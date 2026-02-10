@@ -1,0 +1,30 @@
+# ===== OS / Editor =====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.venv/
+venv/
+env/
+
+# ===== Node =====
+node_modules/
+dist/
+build/
+*.local
+
+# ===== Env / secrets =====
+.env
+.env.*
+
+# ===== FastAPI uploads/temp =====
+uploads/
+temp/
+*.sqlite3
