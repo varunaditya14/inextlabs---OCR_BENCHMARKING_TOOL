@@ -1,82 +1,123 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
-/**
- * lines: [{ text, score, box }]
- * box: [[x1,y1],[x2,y2],[x3,y3],[x4,y4]] (EasyOCR style)
- */
-export default function ImageOverlay({ file, lines }) {
+export default function ImageOverlay({ file, lines = [] }) {
+  const wrapRef = useRef(null);
   const imgRef = useRef(null);
   const canvasRef = useRef(null);
-  const [imgUrl, setImgUrl] = useState(null);
 
+  const [src, setSrc] = useState("");
+
+  // ✅ stable blob URL lifecycle
   useEffect(() => {
     if (!file) {
-      setImgUrl(null);
+      setSrc("");
       return;
     }
     const url = URL.createObjectURL(file);
-    setImgUrl(url);
+    setSrc(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
-  const safeLines = useMemo(() => (Array.isArray(lines) ? lines : []), [lines]);
-
-  function draw() {
-    const img = imgRef.current;
-    const canvas = canvasRef.current;
-    if (!img || !canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    const w = img.clientWidth;
-    const h = img.clientHeight;
-
-    canvas.width = w;
-    canvas.height = h;
-
-    ctx.clearRect(0, 0, w, h);
-    ctx.lineWidth = 2;
-
-    const nw = img.naturalWidth || w;
-    const nh = img.naturalHeight || h;
-    const sx = w / nw;
-    const sy = h / nh;
-
-    for (const item of safeLines) {
-      const box = item?.box;
-      if (!Array.isArray(box) || box.length !== 4) continue;
-
-      const pts = box.map(([x, y]) => [x * sx, y * sy]);
-
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      ctx.lineTo(pts[1][0], pts[1][1]);
-      ctx.lineTo(pts[2][0], pts[2][1]);
-      ctx.lineTo(pts[3][0], pts[3][1]);
-      ctx.closePath();
-      ctx.stroke();
-    }
-  }
-
   useEffect(() => {
-    draw();
-    const onResize = () => draw();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imgUrl, safeLines]);
+    function render() {
+      const wrap = wrapRef.current;
+      const img = imgRef.current;
+      const canvas = canvasRef.current;
 
-  if (!file) return null;
+      if (!wrap || !img || !canvas) return;
+      if (!img.complete || !img.naturalWidth || !img.naturalHeight) return;
+
+      const wrapRect = wrap.getBoundingClientRect();
+
+      // ✅ Canvas matches wrapper size in real pixels
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.round(wrapRect.width * dpr));
+      canvas.height = Math.max(1, Math.round(wrapRect.height * dpr));
+      canvas.style.width = `${wrapRect.width}px`;
+      canvas.style.height = `${wrapRect.height}px`;
+
+      const ctx = canvas.getContext("2d");
+      // draw in CSS pixels while canvas is scaled by DPR
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, wrapRect.width, wrapRect.height);
+
+      // ✅ IMPORTANT: correct math for object-fit: contain
+      const naturalW = img.naturalWidth;
+      const naturalH = img.naturalHeight;
+
+      const containerW = wrapRect.width;
+      const containerH = wrapRect.height;
+
+      const imageRatio = naturalW / naturalH;
+      const containerRatio = containerW / containerH;
+
+      let renderW, renderH;
+      let offsetX = 0,
+        offsetY = 0;
+
+      if (imageRatio > containerRatio) {
+        // image fits width, height letterboxed
+        renderW = containerW;
+        renderH = containerW / imageRatio;
+        offsetY = (containerH - renderH) / 2;
+      } else {
+        // image fits height, width letterboxed
+        renderH = containerH;
+        renderW = containerH * imageRatio;
+        offsetX = (containerW - renderW) / 2;
+      }
+
+      const scaleX = renderW / naturalW;
+      const scaleY = renderH / naturalH;
+
+      // box style (brand red)
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(240, 87, 66, 0.95)";
+      ctx.fillStyle = "rgba(240, 87, 66, 0.10)";
+
+      for (const l of lines || []) {
+        const box = l?.box;
+        if (!Array.isArray(box) || box.length !== 4) continue;
+
+        const pts = box.map(([x, y]) => [
+          offsetX + x * scaleX,
+          offsetY + y * scaleY,
+        ]);
+
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        ctx.lineTo(pts[1][0], pts[1][1]);
+        ctx.lineTo(pts[2][0], pts[2][1]);
+        ctx.lineTo(pts[3][0], pts[3][1]);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    // draw now + on resize
+    render();
+    window.addEventListener("resize", render);
+    return () => window.removeEventListener("resize", render);
+  }, [lines, src]);
+
+  if (!src) return null;
 
   return (
-    <div className="overlayWrap">
+    <div ref={wrapRef} className="overlay-wrap">
       <img
         ref={imgRef}
-        src={imgUrl}
-        alt="uploaded"
-        className="overlayImg"
-        onLoad={draw}
+        src={src}
+        alt="preview"
+        className="overlay-img"
+        onLoad={() => {
+          // wait for layout before drawing
+          requestAnimationFrame(() => {
+            window.dispatchEvent(new Event("resize"));
+          });
+        }}
       />
-      <canvas ref={canvasRef} className="overlayCanvas" />
+      <canvas ref={canvasRef} className="overlay-canvas" />
     </div>
   );
 }

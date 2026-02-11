@@ -1,162 +1,198 @@
-// frontend/components/OcrPlayground.jsx
+import React, { useMemo, useState } from "react";
+import { runOcr } from "../src/api.js";
 
-import { useEffect, useMemo, useState } from "react";
-import { fetchModels, runOcr, downloadJson } from "../src/api.js";
+import Hero from "./Hero.jsx";
+import ModelSelect from "./ModelSelect.jsx";
 import ImageOverlay from "./ImageOverlay.jsx";
 import JsonViewer from "./JsonViewer.jsx";
 
+function safeNum(n) {
+  return Number.isFinite(n) ? n : 0;
+}
+
+function computeMetrics(result) {
+  const lines = Array.isArray(result?.lines) ? result.lines : [];
+  const text = typeof result?.text === "string" ? result.text : "";
+  const avgConf =
+    lines.length === 0
+      ? 0
+      : lines.reduce((a, l) => a + safeNum(l?.score), 0) / lines.length;
+
+  return {
+    latency: safeNum(result?.backend_latency_ms),
+    numLines: lines.length,
+    numChars: text.length,
+    avgConf,
+  };
+}
+
 export default function OcrPlayground() {
-  const [models, setModels] = useState([]);
-  const [model, setModel] = useState("");
+  const [selectedModel, setSelectedModel] = useState("easyocr");
   const [file, setFile] = useState(null);
 
+  const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [result, setResult] = useState(null);
 
-  // Load models on page load
- useEffect(() => {
-  (async () => {
-    try {
-      setError("");
-      const list = await fetchModels();
-      console.log("Models from backend:", list);
-
-      const arr = Array.isArray(list) ? list : [];
-      setModels(arr);
-      setModel(arr[0] || "");
-    } catch (e) {
-      console.log("models fetch error:", e);
-      setError(e.message || "Failed to load models");
-      setModels([]); // make it explicit
-    }   
-  })();
-}, []);
-
-
-  const lines = useMemo(() => result?.lines || [], [result]);
-
-  const metrics = useMemo(() => {
-    if (!result) return null;
-
-    const avgConf =
-      Array.isArray(result.lines) && result.lines.length
-        ? result.lines.reduce((s, x) => s + (Number(x.score) || 0), 0) /
-          result.lines.length
-        : null;
-
-    const textLen = (result.text || "").length;
-
-    return {
-      model: result.model,
-      filename: result.filename,
-      client_latency_ms: result.client_latency_ms ?? null,
-      backend_latency_ms: result.latency_ms ?? null,
-      num_lines: Array.isArray(result.lines) ? result.lines.length : 0,
-      text_chars: textLen,
-      avg_confidence: avgConf != null ? Number(avgConf.toFixed(3)) : null,
-    };
-  }, [result]);
+  const metrics = useMemo(() => computeMetrics(result), [result]);
 
   async function onRun() {
     setError("");
-    setResult(null);
 
-    if (!model) return setError("Select a model.");
-    if (!file) return setError("Upload an image first.");
+    if (!file) {
+      setError("Please choose an image first.");
+      return;
+    }
 
-    setLoading(true);
     try {
-      const data = await runOcr({ model, file });
+      setLoading(true);
+      const data = await runOcr(selectedModel, file);
       setResult(data);
     } catch (e) {
-      console.log("run ocr error:", e);
-      setError(e.message || "OCR failed");
+      setError(typeof e?.message === "string" ? e.message : "Failed to run OCR.");
     } finally {
       setLoading(false);
     }
   }
 
-  function onDownload() {
+  function downloadJson() {
     if (!result) return;
-    const name = (result.filename || "ocr_result").replace(/\.[^/.]+$/, "");
-    downloadJson(`${name}_${result.model || "model"}.json`, result);
+
+    const blob = new Blob([JSON.stringify(result, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+
+    // ✅ IMPORTANT: use backticks ` ` not quotes
+    a.download = `${result.model || "ocr"}_${result.filename || "result"}.json`;
+
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    URL.revokeObjectURL(url);
   }
 
   return (
-    <>
-      <div className="grid">
-        <div className="panel">
-          <div className="panelTitle">OCR Playground</div>
+    <div className="page">
+      {/* HERO */}
+      <Hero onRun={onRun} />
 
-          <div className="row">
-            <div className="label">Model</div>
-            <select
-              className="select"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-            >
-              <option value="">-- Select --</option>
-              {models.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
+      {/* TWO BOXES */}
+      <section className="showcase">
+        {/* LEFT: INPUT */}
+        <div className="big-box">
+          <div className="big-box-head">
+            <span className="muted-small"></span>
           </div>
 
-          <div className="row">
-            <div className="label">Upload</div>
-            <input
-              className="file"
-              type="file"
-              accept="image/*"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-            />
+          <div className="big-box-controls">
+            <label className="choose-file">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const f = e.target.files?.[0] || null;
+                  setFile(f);
+                  setResult(null);
+                  setError("");
+                }}
+              />
+              <span>{file ? "Change File" : "Choose File"}</span>
+            </label>
+
+            <div className="model-wrap">
+              <ModelSelect value={selectedModel} onChange={setSelectedModel} />
+            </div>
           </div>
 
-          <div className="row">
-            <button className="btn" onClick={onRun} disabled={loading}>
-              {loading ? "Running..." : "Run OCR"}
-            </button>
-
-            <button className="btnSecondary" onClick={onDownload} disabled={!result}>
-              Download JSON
-            </button>
+          <div className="preview-area">
+            {file ? (
+              <div className="preview-stage">
+                <ImageOverlay file={file} lines={result?.lines || []} />
+              </div>
+            ) : (
+              <div className="preview-empty">
+                <div className="preview-empty-title">No image selected</div>
+                <div className="muted-small"></div>
+              </div>
+            )}
           </div>
 
-          {error ? <div className="error">{error}</div> : null}
+          {error ? <div className="error-banner">{error}</div> : null}
 
-          {metrics ? (
-            <div className="metrics">
-              <div className="panelTitle">Benchmark Metrics</div>
-              <div className="metricsGrid">
-                {Object.entries(metrics).map(([k, v]) => (
-                  <div key={k} className="metricItem">
-                    <div className="metricKey">{k}</div>
-                    <div className="metricVal">{v === null ? "-" : String(v)}</div>
-                  </div>
-                ))}
+          <div className="bottom-note">
+            Selected model: <span className="accent">{selectedModel}</span>
+          </div>
+        </div>
+
+        {/* RIGHT: OUTPUT */}
+        <div className="big-box">
+          <div className="big-box-head">
+            <h3>Benchmark Output</h3>
+            <span className="muted-small"></span>
+          </div>
+
+          {!result ? (
+            <div className="output-empty">
+              <div className="preview-empty-title">No output yet</div>
+              <div className="muted-small">
+                Click <span className="accent">Run Benchmark</span> to get results.
               </div>
             </div>
-          ) : null}
+          ) : (
+            <div className="output-grid">
+              <div className="output-card">
+                <div className="output-card-title">Extracted Text</div>
+                <pre className="output-pre">{result.text || ""}</pre>
+              </div>
 
-          {result?.text ? (
-            <div className="panel" style={{ marginTop: 12 }}>
-              <div className="panelTitle">Extracted Text</div>
-              <pre className="textBox">{result.text}</pre>
+              <div className="output-card">
+                <div className="output-card-title">JSON Output</div>
+                <div className="json-wrap">
+                  <JsonViewer data={result} />
+                </div>
+              </div>
+
+              <div className="metrics-row">
+                <div className="metric-pill">
+                  latency <span className="accent">{metrics.latency.toFixed(1)}ms</span>
+                </div>
+                <div className="metric-pill">
+                  lines <span className="accent">{metrics.numLines}</span>
+                </div>
+                <div className="metric-pill">
+                  chars <span className="accent">{metrics.numChars}</span>
+                </div>
+                <div className="metric-pill">
+                  avg conf{" "}
+                  <span className="accent">{(metrics.avgConf * 100).toFixed(1)}%</span>
+                </div>
+
+                <div className="metrics-spacer" />
+
+                <button className="download-btn" onClick={downloadJson}>
+                  Download JSON
+                </button>
+              </div>
             </div>
-          ) : null}
-        </div>
+          )}
 
-        <div className="panel">
-          <div className="panelTitle">Image + Bounding Boxes</div>
-          <ImageOverlay file={file} lines={lines} />
-          {!file ? <div className="hint">Upload an image to preview boxes.</div> : null}
+          {loading ? (
+  <div className="loadingPill" role="status" aria-live="polite">
+    <span className="loadingSpinner" aria-hidden="true" />
+    <span className="loadingText">Processing</span>
+    <span className="loadingDots" aria-hidden="true">
+      <i>.</i><i>.</i><i>.</i>
+    </span>
+    <span className="loadingShimmer" aria-hidden="true" />
+  </div>
+) : null}
         </div>
-      </div>
-
-      <JsonViewer data={result} />
-    </>
+      </section>
+    </div>
   );
 }

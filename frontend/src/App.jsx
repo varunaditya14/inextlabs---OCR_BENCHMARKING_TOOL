@@ -1,12 +1,10 @@
-import Navbar from "../components/Navbar.jsx";
-import Hero from "../components/Hero.jsx";
+import React from "react";
+import "./styles.css";
 import OcrPlayground from "../components/OcrPlayground.jsx";
 
 export default function App() {
   return (
-    <div className="page">
-      <Navbar />
-      <Hero />
+    <div className="app-shell">
       <OcrPlayground />
     </div>
   );
