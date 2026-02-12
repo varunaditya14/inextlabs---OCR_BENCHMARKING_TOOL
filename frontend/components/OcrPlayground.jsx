@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { runOcr } from "../src/api.js";
 
 import Hero from "./Hero.jsx";
@@ -13,13 +13,21 @@ function safeNum(n) {
 function computeMetrics(result) {
   const lines = Array.isArray(result?.lines) ? result.lines : [];
   const text = typeof result?.text === "string" ? result.text : "";
+
+  // support BOTH latency_ms and backend_latency_ms
+  const latency =
+    result?.latency_ms ??
+    result?.backend_latency_ms ??
+    result?.latency ??
+    0;
+
   const avgConf =
     lines.length === 0
       ? 0
       : lines.reduce((a, l) => a + safeNum(l?.score), 0) / lines.length;
 
   return {
-    latency: safeNum(result?.backend_latency_ms),
+    latency: safeNum(latency),
     numLines: lines.length,
     numChars: text.length,
     avgConf,
@@ -30,9 +38,22 @@ export default function OcrPlayground() {
   const [selectedModel, setSelectedModel] = useState("easyocr");
   const [file, setFile] = useState(null);
 
+  const [previewUrl, setPreviewUrl] = useState("");
+
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Create preview URL for image/pdf panel
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl("");
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
 
   const metrics = useMemo(() => computeMetrics(result), [result]);
 
@@ -40,7 +61,7 @@ export default function OcrPlayground() {
     setError("");
 
     if (!file) {
-      setError("Please choose an image first.");
+      setError("Please choose an image or PDF first.");
       return;
     }
 
@@ -61,18 +82,18 @@ export default function OcrPlayground() {
     const blob = new Blob([JSON.stringify(result, null, 2)], {
       type: "application/json",
     });
-    const url = URL.createObjectURL(blob);
 
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
 
-    // ✅ IMPORTANT: use backticks ` ` not quotes
-    a.download = `${result.model || "ocr"}_${result.filename || "result"}.json`;
+    const model = result?.model || "ocr";
+    const name = result?.filename || "result";
+    a.download = `${model}_${name}.json`;
 
     document.body.appendChild(a);
     a.click();
     a.remove();
-
     URL.revokeObjectURL(url);
   }
 
@@ -93,7 +114,7 @@ export default function OcrPlayground() {
             <label className="choose-file">
               <input
                 type="file"
-                accept="image/*"
+                accept="image/*,application/pdf"
                 onChange={(e) => {
                   const f = e.target.files?.[0] || null;
                   setFile(f);
@@ -109,10 +130,15 @@ export default function OcrPlayground() {
             </div>
           </div>
 
+          {/* PREVIEW AREA (IMAGE OR PDF) */}
           <div className="preview-area">
             {file ? (
               <div className="preview-stage">
-                <ImageOverlay file={file} lines={result?.lines || []} />
+                <ImageOverlay
+                  fileUrl={previewUrl}
+                  mimeType={file?.type}
+                  ocrResult={result}
+                />
               </div>
             ) : (
               <div className="preview-empty">
@@ -159,7 +185,8 @@ export default function OcrPlayground() {
 
               <div className="metrics-row">
                 <div className="metric-pill">
-                  latency <span className="accent">{metrics.latency.toFixed(1)}ms</span>
+                  latency{" "}
+                  <span className="accent">{metrics.latency.toFixed(1)}ms</span>
                 </div>
                 <div className="metric-pill">
                   lines <span className="accent">{metrics.numLines}</span>
@@ -169,28 +196,32 @@ export default function OcrPlayground() {
                 </div>
                 <div className="metric-pill">
                   avg conf{" "}
-                  <span className="accent">{(metrics.avgConf * 100).toFixed(1)}%</span>
+                  <span className="accent">
+                    {(metrics.avgConf * 100).toFixed(1)}%
+                  </span>
                 </div>
-
-                <div className="metrics-spacer" />
-
-                <button className="download-btn" onClick={downloadJson}>
-                  Download JSON
-                </button>
               </div>
+
+              <div className="metrics-spacer" />
+
+              <button className="download-btn" onClick={downloadJson}>
+                Download JSON
+              </button>
             </div>
           )}
 
           {loading ? (
-  <div className="loadingPill" role="status" aria-live="polite">
-    <span className="loadingSpinner" aria-hidden="true" />
-    <span className="loadingText">Processing</span>
-    <span className="loadingDots" aria-hidden="true">
-      <i>.</i><i>.</i><i>.</i>
-    </span>
-    <span className="loadingShimmer" aria-hidden="true" />
-  </div>
-) : null}
+            <div className="loadingPill" role="status" aria-live="polite">
+              <span className="loadingSpinner" aria-hidden="true" />
+              <span className="loadingText">Processing</span>
+              <span className="loadingDots" aria-hidden="true">
+                <i>.</i>
+                <i>.</i>
+                <i>.</i>
+              </span>
+              <span className="loadingShimmer" aria-hidden="true" />
+            </div>
+          ) : null}
         </div>
       </section>
     </div>

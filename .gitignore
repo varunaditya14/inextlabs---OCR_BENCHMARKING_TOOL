@@ -12,7 +12,7 @@ __pycache__/
 *.log
 .venv/
 venv/
-env/
+
 
 # ===== Node =====
 node_modules/
@@ -20,11 +20,9 @@ dist/
 build/
 *.local
 
-# ===== Env / secrets =====
-.env
-.env.*
 
 # ===== FastAPI uploads/temp =====
 uploads/
 temp/
 *.sqlite3
+
