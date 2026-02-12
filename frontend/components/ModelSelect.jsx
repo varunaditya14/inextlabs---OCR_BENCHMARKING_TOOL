@@ -4,6 +4,8 @@ const OPTIONS = [
   { label: "EasyOCR", value: "easyocr" },
   { label: "PaddleOCR", value: "paddleocr" },
   { label: "Dummy", value: "dummy" },
+  { label: "Mistral OCR", value: "mistral" }
+
 ];
 
 export default function ModelSelect({ value, onChange }) {

@@ -26,3 +26,8 @@ uploads/
 temp/
 *.sqlite3
 
+# Env files
+.env
+.env.*
+frontend/.env
+ocr-benchmark/backend/.env

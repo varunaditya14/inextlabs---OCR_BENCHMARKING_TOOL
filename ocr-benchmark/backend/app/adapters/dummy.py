@@ -1,15 +1,16 @@
-from __future__ import annotations
-
-from typing import Any, Dict
-
+from typing import Any, Dict, Optional
 from .base import OCRAdapter
 
+class DummyOCRAdapter(OCRAdapter):
+    @property
+    def name(self) -> str:
+        return "dummy"
 
-class DummyAdapter(OCRAdapter):
-    def run(self, filename: str, file_bytes: bytes) -> Dict[str, Any]:
+    def run(self, image_bytes: Optional[bytes] = None, filename: str = "", mime_type: str = "", **kwargs) -> Dict[str, Any]:
         return {
-            "model": "dummy",
-            "filename": filename,
-            "text": "dummy output (OCR not installed yet)",
+            "model": self.name,
+            "latency_ms": 0,
+            "raw": {},
+            "text": "(dummy) no OCR performed",
             "lines": [],
         }

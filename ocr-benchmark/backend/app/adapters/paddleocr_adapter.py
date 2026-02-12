@@ -1,14 +1,19 @@
 # ocr-benchmark/backend/app/adapters/paddleocr_adapter.py
 
 import time
-from typing import Any, Dict, List
+import io
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+from PIL import Image
 
 from app.adapters.base import OCRAdapter
 
 
 class PaddleOCRAdapter(OCRAdapter):
-    def __init__(self) -> None:
-        self._ocr = None  # lazy init
+    def __init__(self):
+        # Lazy init (first request will load models)
+        self._ocr = None
 
     @property
     def name(self) -> str:
@@ -17,61 +22,84 @@ class PaddleOCRAdapter(OCRAdapter):
     def _get_ocr(self):
         if self._ocr is None:
             from paddleocr import PaddleOCR
-            # keep logs minimal + stable
+            # show_log=False -> removes huge config spam
             self._ocr = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
         return self._ocr
 
-    def run(self, file_bytes: bytes, filename: str = "") -> Dict[str, Any]:
-        import numpy as np
-        import cv2
+    def run(
+        self,
+        image_bytes: Optional[bytes] = None,
+        filename: str = "",
+        mime_type: str = "",
+        **kwargs
+    ) -> Dict[str, Any]:
+        if image_bytes is None:
+            # accept alternative keys if main passes differently
+            for k in ("file_bytes", "bytes", "image", "content", "data"):
+                if k in kwargs and kwargs[k] is not None:
+                    image_bytes = kwargs[k]
+                    break
+        if image_bytes is None:
+            raise RuntimeError("PaddleOCRAdapter.run() did not receive image bytes")
 
         t0 = time.time()
 
-        # decode image bytes -> BGR image
-        nparr = np.frombuffer(file_bytes, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        if img is None:
-            raise ValueError("Invalid image bytes (cv2.imdecode returned None).")
+        # bytes -> PIL -> numpy
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        arr = np.array(img)[:, :, ::-1]  # RGB->BGR for OCR libs that expect BGR
 
         ocr = self._get_ocr()
+        result = ocr.ocr(arr, cls=True)
 
-        # PaddleOCR output formats can vary slightly across versions.
-        raw = ocr.ocr(img, cls=True)
+        lines_out: List[str] = []
+        confs: List[float] = []
+        boxes_out: List[List[List[int]]] = []
 
-        # ---- SAFE PARSING (prevents IndexError) ----
-        # Typical: raw = [ [ [box, (text, conf)], ... ] ]
-        # But if no text: raw = [ [] ] or [] or None
-        detections = []
-        if raw and isinstance(raw, list):
-            if len(raw) == 1 and isinstance(raw[0], list):
-                detections = raw[0]  # per-image list
-            else:
-                detections = raw
+        # Paddle returns: [ [ [box], (text, conf) ], ... ] per page
+        if result and isinstance(result, list):
+            page0 = result[0] if len(result) > 0 else []
+            if page0 and isinstance(page0, list):
+                for item in page0:
+                    if not item or len(item) < 2:
+                        continue
+                    box = item[0]
+                    txt_conf = item[1]
+                    if not isinstance(txt_conf, (list, tuple)) or len(txt_conf) < 2:
+                        continue
+                    text = str(txt_conf[0]).strip()
+                    conf = float(txt_conf[1])
 
-        lines: List[Dict[str, Any]] = []
-        texts: List[str] = []
+                    if text:
+                        lines_out.append(text)
+                        confs.append(conf)
 
-        for det in detections:
-            # det usually: [box, (text, conf)]
-            try:
-                box = det[0]
-                txt_conf = det[1]
-                text = txt_conf[0] if isinstance(txt_conf, (list, tuple)) and len(txt_conf) > 0 else ""
-                conf = float(txt_conf[1]) if isinstance(txt_conf, (list, tuple)) and len(txt_conf) > 1 else None
-            except Exception:
-                # if paddle returns something unexpected, skip that entry instead of crashing
-                continue
+                    # box points -> ints
+                    if isinstance(box, list):
+                        pts = []
+                        for pt in box:
+                            if isinstance(pt, (list, tuple)) and len(pt) == 2:
+                                pts.append([int(pt[0]), int(pt[1])])
+                        if pts:
+                            boxes_out.append(pts)
 
-            if text:
-                texts.append(text)
-                lines.append({"text": text, "confidence": conf, "box": box})
-
+        extracted_text = "\n".join(lines_out).strip()
         latency_ms = int((time.time() - t0) * 1000)
+
+        avg_conf = float(sum(confs) / len(confs)) if confs else 0.0
 
         return {
             "model": self.name,
-            "filename": filename,
-            "text": "\n".join(texts),   # empty string if nothing detected (NO crash)
-            "lines": lines,             # empty list if nothing detected
             "latency_ms": latency_ms,
+            "latency": latency_ms,
+            "filename": filename,
+            "mime_type": mime_type,
+            "text": extracted_text,
+            "lines": len(lines_out),
+            "chars": len(extracted_text),
+            "avg_conf": avg_conf,
+            "raw": {
+                "lines": lines_out,
+                "boxes": boxes_out,  # optional, for bbox overlay later
+                "confs": confs,
+            },
         }
