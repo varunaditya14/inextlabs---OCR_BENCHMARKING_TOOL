@@ -16,3 +16,10 @@ python-dotenv
 
 pymupdf
 pillow
+
+google-genai
+
+transformers
+pillow
+sentencepiece
+torch

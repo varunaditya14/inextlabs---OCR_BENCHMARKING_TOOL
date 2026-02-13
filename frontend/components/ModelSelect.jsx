@@ -4,7 +4,11 @@ const OPTIONS = [
   { label: "EasyOCR", value: "easyocr" },
   { label: "PaddleOCR", value: "paddleocr" },
   { label: "Dummy", value: "dummy" },
-  { label: "Mistral OCR", value: "mistral" }
+  { label: "Mistral OCR", value: "mistral" },
+  { label: "Gemini 3", value: "gemini3" },
+  { label: "Gemini 3 Pro", value: "gemini3pro" },
+  { label: "TrOCR", value: "trocr" },
+  { label: "Azure Document Intelligence", value: "azure_docintel" },
 
 ];
 

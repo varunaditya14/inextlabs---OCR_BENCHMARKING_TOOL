@@ -3,11 +3,11 @@
   "private": true,
   "scripts": {
     "dev": "concurrently -n BACKEND,FRONTEND -c auto \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:backend": "cd ocr-benchmark\\backend && ..\\..\\venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
+    "dev:backend": "cd ocr-benchmark\\backend && ..\\..\\venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 --log-level warning",
     "dev:frontend": "cd frontend && npm run dev",
     "install:all": "npm install && cd frontend && npm install"
   },
   "devDependencies": {
-    "concurrently": "^9.0.0"
+    "concurrently": "^9.2.1"
   }
 }
