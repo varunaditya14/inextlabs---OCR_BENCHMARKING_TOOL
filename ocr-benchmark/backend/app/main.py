@@ -18,14 +18,12 @@ os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 BACKEND_ENV = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(dotenv_path=BACKEND_ENV)
 
-from app.adapters.dummy import DummyOCRAdapter
 from app.adapters.easyocr_adapter import EasyOCRAdapter
 from app.adapters.paddleocr_adapter import PaddleOCRAdapter
 from app.adapters.mistral_adapter import MistralOCRAdapter
 from app.adapters.gemini3_adapter import Gemini3Adapter
 from app.adapters.gemini3pro_adapter import Gemini3ProAdapter
 from app.adapters.trocr_adapter import TrOCRAdapter
-from app.adapters.azure_docintel_adapter import AzureDocIntelAdapter
 
 
 app = FastAPI(title="OCR Benchmark Backend")
@@ -39,14 +37,12 @@ app.add_middleware(
 )
 
 ADAPTERS = {
-    "dummy": DummyOCRAdapter(),
     "easyocr": EasyOCRAdapter(),
     "paddleocr": PaddleOCRAdapter(),
     "mistral": MistralOCRAdapter(),
     "gemini3": Gemini3Adapter(),         
     "gemini3pro": Gemini3ProAdapter(),   
     "trocr": TrOCRAdapter(),             
-    "azure_docintel": AzureDocIntelAdapter(),
 
 }
 
