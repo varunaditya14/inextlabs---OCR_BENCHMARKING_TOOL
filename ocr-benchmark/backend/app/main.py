@@ -24,7 +24,7 @@ from app.adapters.mistral_adapter import MistralOCRAdapter
 from app.adapters.gemini3_adapter import Gemini3Adapter
 from app.adapters.gemini3pro_adapter import Gemini3ProAdapter
 from app.adapters.trocr_adapter import TrOCRAdapter
-
+from app.adapters.glmocr_adapter import GLMOCRAdapter
 
 app = FastAPI(title="OCR Benchmark Backend")
 
@@ -37,14 +37,15 @@ app.add_middleware(
 )
 
 ADAPTERS = {
-    "easyocr": EasyOCRAdapter(),
-    "paddleocr": PaddleOCRAdapter(),
-    "mistral": MistralOCRAdapter(),
-    "gemini3": Gemini3Adapter(),         
-    "gemini3pro": Gemini3ProAdapter(),   
-    "trocr": TrOCRAdapter(),             
-
+    "easyocr": EasyOCRAdapter,
+    "paddleocr": PaddleOCRAdapter,
+    "mistral": MistralOCRAdapter,
+    "gemini3": Gemini3Adapter,
+    "gemini3pro": Gemini3ProAdapter,
+    "trocr": TrOCRAdapter,      # lazy
+    "glm-ocr": GLMOCRAdapter,   # lazy
 }
+
 
 def sanitize_for_json(obj: Any) -> Any:
     """
@@ -137,7 +138,8 @@ async def run_ocr(
     if model not in ADAPTERS:
         raise HTTPException(status_code=400, detail=f"Unknown model: {model}")
 
-    adapter = ADAPTERS[model]
+    adapter_class = ADAPTERS[model]
+    adapter = adapter_class()
 
     file_bytes = await file.read()
     mime_type = (file.content_type or "").lower()
@@ -148,7 +150,7 @@ async def run_ocr(
     effective_mime = mime_type
 
     # ✅ image-only engines (need image bytes)
-    IMG_ONLY_MODELS = {"easyocr", "paddleocr", "dummy", "trocr", "gemini3", "gemini3pro"}
+    IMG_ONLY_MODELS = {"easyocr", "paddleocr", "dummy", "trocr", "gemini3", "gemini3pro", "glm-ocr"}
 
     if mime_type == "application/pdf" and model in IMG_ONLY_MODELS:
         effective_bytes = pdf_first_page_to_png_bytes(file_bytes, dpi=200)

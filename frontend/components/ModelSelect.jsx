@@ -7,7 +7,7 @@ const OPTIONS = [
   { label: "Gemini 3", value: "gemini3" },
   { label: "Gemini 3 Pro", value: "gemini3pro" },
   { label: "TrOCR", value: "trocr" },
-
+  { label: "GLM OCR", value: "glm-ocr" },
 ];
 
 export default function ModelSelect({ value, onChange }) {

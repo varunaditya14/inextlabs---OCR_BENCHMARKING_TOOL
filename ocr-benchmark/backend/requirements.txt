@@ -23,3 +23,6 @@ transformers
 pillow
 sentencepiece
 torch
+
+ollama pull glm-ocr
+requests
