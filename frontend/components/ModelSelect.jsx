@@ -1,75 +1,41 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+// frontend/components/ModelSelect.jsx
+import React from "react";
 
-const OPTIONS = [
-  { label: "EasyOCR", value: "easyocr" },
-  { label: "PaddleOCR", value: "paddleocr" },
-  { label: "Mistral OCR", value: "mistral" },
-  { label: "Gemini 3", value: "gemini3" },
-  { label: "Gemini 3 Pro", value: "gemini3pro" },
-  { label: "TrOCR", value: "trocr" },
-  { label: "GLM OCR", value: "glm-ocr" },
-];
-
-export default function ModelSelect({ value, onChange }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef(null);
-
-  const selected = useMemo(
-    () => OPTIONS.find((o) => o.value === value) || OPTIONS[0],
-    [value]
-  );
-
-  useEffect(() => {
-    function onDocClick(e) {
-      if (!rootRef.current) return;
-      if (!rootRef.current.contains(e.target)) setOpen(false);
-    }
-    function onEsc(e) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onEsc);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onEsc);
-    };
-  }, []);
+export default function ModelSelect({
+  value,
+  onChange,
+  options = [],
+  disabled = false,
+  label = "",
+}) {
+  const list = Array.isArray(options) ? options : [];
+  const normalized = list
+    .map((m) => {
+      if (typeof m === "string") return { id: m, label: m };
+      if (m && typeof m === "object") return { id: m.id ?? m.value ?? "", label: m.label ?? m.name ?? m.id ?? "" };
+      return null;
+    })
+    .filter((x) => x && x.id);
 
   return (
-    <div className="glassSelect" ref={rootRef}>
-      <button
-        type="button"
-        className="glassSelectBtn"
-        onClick={() => setOpen((s) => !s)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-      >
-        <span className="glassSelectValue">{selected.label}</span>
-        <span className={`glassSelectChevron ${open ? "isOpen" : ""}`}>⌄</span>
-      </button>
+    <div className="modelSelect">
+      {label ? <div className="modelSelect__label">{label}</div> : null}
 
-      {open && (
-        <div className="glassSelectMenu" role="listbox">
-          {OPTIONS.map((opt) => {
-            const active = opt.value === selected.value;
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                role="option"
-                aria-selected={active}
-                className={`glassSelectItem ${active ? "isActive" : ""}`}
-                onClick={() => {
-                  onChange(opt.value);
-                  setOpen(false);
-                }}
-              >
-                {opt.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {/* ✅ WRAP + CLASSNAMES REQUIRED FOR CSS TO WORK */}
+      <div className="ocr-selectWrap">
+        <select
+          className="ocr-select"
+          value={value || ""}
+          onChange={(e) => onChange?.(e.target.value)}
+          disabled={disabled}
+        >
+          {normalized.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 }

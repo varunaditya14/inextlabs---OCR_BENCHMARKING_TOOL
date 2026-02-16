@@ -1,11 +1,6 @@
-import React from "react";
 import "./styles.css";
-import OcrPlayground from "../components/OcrPlayground.jsx";
+import OcrPlayground from "../components/OcrPlayground";
 
 export default function App() {
-  return (
-    <div className="app-shell">
-      <OcrPlayground />
-    </div>
-  );
+  return <OcrPlayground />;
 }
