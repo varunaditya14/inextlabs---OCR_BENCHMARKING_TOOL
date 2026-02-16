@@ -2,22 +2,27 @@
 
 import time
 import base64
+import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-import os
+# ✅ NEW: billing helper
+from app.billing import build_billing
+
+# ✅ Reduce noisy logs (optional)
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
-
+# ✅ Load backend .env (located at ocr-benchmark/backend/.env)
 BACKEND_ENV = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(dotenv_path=BACKEND_ENV)
 
+# ===== Adapters =====
 from app.adapters.easyocr_adapter import EasyOCRAdapter
 from app.adapters.paddleocr_adapter import PaddleOCRAdapter
 from app.adapters.mistral_adapter import MistralOCRAdapter
@@ -26,35 +31,38 @@ from app.adapters.gemini3pro_adapter import Gemini3ProAdapter
 from app.adapters.trocr_adapter import TrOCRAdapter
 from app.adapters.glmocr_adapter import GLMOCRAdapter
 
+
 app = FastAPI(title="OCR Benchmark Backend")
 
+# ✅ CORS (frontend calls backend)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ===== Registry of available models =====
 ADAPTERS = {
     "easyocr": EasyOCRAdapter,
     "paddleocr": PaddleOCRAdapter,
     "mistral": MistralOCRAdapter,
     "gemini3": Gemini3Adapter,
     "gemini3pro": Gemini3ProAdapter,
-    "trocr": TrOCRAdapter,      # lazy
-    "glm-ocr": GLMOCRAdapter,   # lazy
+    "trocr": TrOCRAdapter,
+    "glm-ocr": GLMOCRAdapter,
 }
+
+# Models that require image bytes (if PDF uploaded -> convert first page to PNG)
+IMG_ONLY_MODELS = {"easyocr", "paddleocr", "trocr", "gemini3", "gemini3pro", "glm-ocr"}
 
 
 def sanitize_for_json(obj: Any) -> Any:
     """
     Convert numpy types / bytes / weird objects into JSON-safe Python types.
-    This fixes: PydanticSerializationError: numpy.int32 not serializable
+    Fixes: numpy.int32 not serializable etc.
     """
-    tname = type(obj).__name__
-    mod = type(obj).__module__
-
     # bytes -> base64 string
     if isinstance(obj, (bytes, bytearray)):
         return base64.b64encode(bytes(obj)).decode("utf-8")
@@ -68,21 +76,23 @@ def sanitize_for_json(obj: Any) -> Any:
         return [sanitize_for_json(x) for x in obj]
 
     # numpy scalar
-    if mod.startswith("numpy") and hasattr(obj, "item"):
+    tname = type(obj).__name__
+    mod = getattr(type(obj), "__module__", "")
+    if str(mod).startswith("numpy") and hasattr(obj, "item"):
         try:
             return obj.item()
         except Exception:
             return str(obj)
 
     # numpy array
-    if mod.startswith("numpy") and hasattr(obj, "tolist"):
+    if str(mod).startswith("numpy") and hasattr(obj, "tolist"):
         try:
             return obj.tolist()
         except Exception:
             return str(obj)
 
     # Path -> string
-    if tname in ("Path",):
+    if isinstance(obj, Path):
         return str(obj)
 
     return obj
@@ -91,16 +101,12 @@ def sanitize_for_json(obj: Any) -> Any:
 def pdf_first_page_to_png_bytes(pdf_bytes: bytes, dpi: int = 200) -> bytes:
     """
     Convert the FIRST PAGE of a PDF to PNG bytes.
-
-    Uses PyMuPDF (fitz). We rasterize with a matrix based on DPI.
-    72 DPI is the PDF default. So scale = dpi / 72.
+    Uses PyMuPDF (fitz).
     """
     try:
         import fitz  # PyMuPDF
     except Exception as e:
-        raise RuntimeError(
-            "PyMuPDF not installed. Install: python -m pip install pymupdf"
-        ) from e
+        raise RuntimeError('PyMuPDF not installed. Install: python -m pip install pymupdf') from e
 
     if not pdf_bytes:
         raise RuntimeError("Empty PDF bytes")
@@ -113,21 +119,31 @@ def pdf_first_page_to_png_bytes(pdf_bytes: bytes, dpi: int = 200) -> bytes:
 
         page = doc.load_page(0)
 
+        # 72 DPI default -> scale = dpi/72
         zoom = float(dpi) / 72.0
         mat = fitz.Matrix(zoom, zoom)
 
-        # alpha=False avoids transparent background issues
         pix = page.get_pixmap(matrix=mat, alpha=False)
         return pix.tobytes("png")
-
     except Exception as e:
         raise RuntimeError(f"Failed to convert PDF to PNG: {e}") from e
-
     finally:
         if doc is not None:
             doc.close()
 
-# API
+
+# ✅ IMPORTANT: This endpoint is what your frontend dropdown needs
+@app.get("/models")
+def list_models() -> List[Dict[str, str]]:
+    """
+    Return supported models for frontend dropdown.
+    Shape: [{id,label}, ...]
+    """
+    out = []
+    for k in ADAPTERS.keys():
+        out.append({"id": k, "label": k})
+    return out
+
 
 @app.post("/run-ocr")
 async def run_ocr(
@@ -145,24 +161,22 @@ async def run_ocr(
     mime_type = (file.content_type or "").lower()
     filename = file.filename or ""
 
-    # If PDF and model is image-only, convert PDF -> PNG(page1)
     effective_bytes = file_bytes
     effective_mime = mime_type
+    effective_filename = filename
 
-    # ✅ image-only engines (need image bytes)
-    IMG_ONLY_MODELS = {"easyocr", "paddleocr", "dummy", "trocr", "gemini3", "gemini3pro", "glm-ocr"}
-
+    # If PDF uploaded and model needs image -> convert first page to PNG
     if mime_type == "application/pdf" and model in IMG_ONLY_MODELS:
         effective_bytes = pdf_first_page_to_png_bytes(file_bytes, dpi=200)
         effective_mime = "image/png"
-        if filename:
-            filename = filename + " (page1).png"
+        if effective_filename:
+            effective_filename = effective_filename + " (page1).png"
 
     t0 = time.time()
     try:
         result = adapter.run(
             image_bytes=effective_bytes,
-            filename=filename,
+            filename=effective_filename,
             mime_type=effective_mime,
         )
     except Exception as e:
@@ -174,15 +188,23 @@ async def run_ocr(
     if isinstance(result, dict):
         result.setdefault("backend_latency_ms", backend_latency_ms)
         result.setdefault("model", model)
-        result.setdefault("filename", filename)
+        result.setdefault("filename", effective_filename)
         result.setdefault("mime_type", effective_mime)
     else:
         result = {
             "model": model,
-            "filename": filename,
+            "filename": effective_filename,
             "mime_type": effective_mime,
             "backend_latency_ms": backend_latency_ms,
             "raw": result,
         }
+
+    # ✅ NEW: attach unified billing for ALL models (local + api)
+    # Uses runtime-based estimate if no token usage exists
+    result["billing"] = build_billing(
+        model=model,
+        payload=result,
+        file_size_bytes=len(file_bytes) if file_bytes else 0,
+    )
 
     return sanitize_for_json(result)
