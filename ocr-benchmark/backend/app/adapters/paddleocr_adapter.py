@@ -46,12 +46,14 @@ class PaddleOCRAdapter(OCRAdapter):
 
         # bytes -> PIL -> numpy
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        arr = np.array(img)[:, :, ::-1]  # RGB->BGR for OCR libs that expect BGR
+        arr = np.array(img)[:, :, ::-1]  # RGB->BGR
 
         ocr = self._get_ocr()
         result = ocr.ocr(arr, cls=True)
 
-        lines_out: List[str] = []
+        # ✅ Standardized lines output (array of objects)
+        lines_objs: List[Dict[str, Any]] = []
+        lines_text: List[str] = []
         confs: List[float] = []
         boxes_out: List[List[List[int]]] = []
 
@@ -62,27 +64,42 @@ class PaddleOCRAdapter(OCRAdapter):
                 for item in page0:
                     if not item or len(item) < 2:
                         continue
+
                     box = item[0]
                     txt_conf = item[1]
+
                     if not isinstance(txt_conf, (list, tuple)) or len(txt_conf) < 2:
                         continue
-                    text = str(txt_conf[0]).strip()
-                    conf = float(txt_conf[1])
 
-                    if text:
-                        lines_out.append(text)
-                        confs.append(conf)
+                    text = str(txt_conf[0]).strip()
+                    try:
+                        conf = float(txt_conf[1])
+                    except Exception:
+                        conf = 0.0
 
                     # box points -> ints
+                    pts: List[List[int]] = []
                     if isinstance(box, list):
-                        pts = []
                         for pt in box:
                             if isinstance(pt, (list, tuple)) and len(pt) == 2:
                                 pts.append([int(pt[0]), int(pt[1])])
+
+                    if text:
+                        lines_text.append(text)
+                        confs.append(conf)
                         if pts:
                             boxes_out.append(pts)
 
-        extracted_text = "\n".join(lines_out).strip()
+                        # ✅ each line as object
+                        lines_objs.append(
+                            {
+                                "text": text,
+                                "score": conf,
+                                "box": pts if pts else None,
+                            }
+                        )
+
+        extracted_text = "\n".join(lines_text).strip()
         latency_ms = int((time.time() - t0) * 1000)
 
         avg_conf = float(sum(confs) / len(confs)) if confs else 0.0
@@ -94,12 +111,21 @@ class PaddleOCRAdapter(OCRAdapter):
             "filename": filename,
             "mime_type": mime_type,
             "text": extracted_text,
-            "lines": len(lines_out),
+
+            # ✅ IMPORTANT: frontend expects `lines` as array
+            "lines": lines_objs,
+
+            # Optional numeric convenience
+            "line_count": len(lines_objs),
+
             "chars": len(extracted_text),
             "avg_conf": avg_conf,
+
+            # keep debug raw
             "raw": {
-                "lines": lines_out,
-                "boxes": boxes_out,  # optional, for bbox overlay later
+                "lines_text": lines_text,
+                "boxes": boxes_out,
                 "confs": confs,
+                "paddle_raw": result,
             },
         }

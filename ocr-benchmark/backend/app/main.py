@@ -3,6 +3,7 @@
 import time
 import base64
 import os
+import asyncio
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -10,7 +11,9 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-# ✅ NEW: billing helper
+from starlette.concurrency import run_in_threadpool
+
+# ✅ billing helper
 from app.billing import build_billing
 
 # ✅ Reduce noisy logs (optional)
@@ -56,6 +59,23 @@ ADAPTERS = {
 
 # Models that require image bytes (if PDF uploaded -> convert first page to PNG)
 IMG_ONLY_MODELS = {"easyocr", "paddleocr", "trocr", "gemini3", "gemini3pro", "glm-ocr"}
+
+# ✅ Model categories for safe concurrency controls
+API_MODELS = {"gemini3", "gemini3pro", "mistral", "glm-ocr"}  # network/rate-limited
+HEAVY_LOCAL_MODELS = {"trocr"}  # heavy torch model
+
+# ✅ Semaphores (tune these)
+API_SEM = asyncio.Semaphore(2)     # allow only 2 API models at a time (avoid 429)
+HEAVY_SEM = asyncio.Semaphore(1)   # avoid overloading TrOCR (GPU/CPU)
+
+# ✅ Reuse adapter instances (prevents re-init overhead if adapters cache models internally)
+_ADAPTER_INSTANCES: Dict[str, Any] = {}
+
+
+def get_adapter_instance(model: str):
+    if model not in _ADAPTER_INSTANCES:
+        _ADAPTER_INSTANCES[model] = ADAPTERS[model]()  # create once
+    return _ADAPTER_INSTANCES[model]
 
 
 def sanitize_for_json(obj: Any) -> Any:
@@ -119,7 +139,6 @@ def pdf_first_page_to_png_bytes(pdf_bytes: bytes, dpi: int = 200) -> bytes:
 
         page = doc.load_page(0)
 
-        # 72 DPI default -> scale = dpi/72
         zoom = float(dpi) / 72.0
         mat = fitz.Matrix(zoom, zoom)
 
@@ -132,19 +151,133 @@ def pdf_first_page_to_png_bytes(pdf_bytes: bytes, dpi: int = 200) -> bytes:
             doc.close()
 
 
-# ✅ IMPORTANT: This endpoint is what your frontend dropdown needs
+# ✅ Frontend dropdown uses this
 @app.get("/models")
 def list_models() -> List[Dict[str, str]]:
-    """
-    Return supported models for frontend dropdown.
-    Shape: [{id,label}, ...]
-    """
     out = []
     for k in ADAPTERS.keys():
         out.append({"id": k, "label": k})
     return out
 
 
+# =========================
+# ✅ NEW FAST ENDPOINT
+# =========================
+@app.post("/run-benchmark")
+async def run_benchmark(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """
+    Runs ALL models in one request, concurrently (safe controlled concurrency),
+    and returns combined results for instant frontend switching.
+    """
+    file_bytes = await file.read()
+    mime_type = (file.content_type or "").lower()
+    filename = file.filename or ""
+
+    png_bytes = None
+    if mime_type == "application/pdf":
+        # Convert once, reuse for image-only models
+        png_bytes = pdf_first_page_to_png_bytes(file_bytes, dpi=200)
+
+    async def run_one(model: str) -> Dict[str, Any]:
+        adapter = get_adapter_instance(model)
+
+        effective_bytes = file_bytes
+        effective_mime = mime_type
+        effective_filename = filename
+
+        if mime_type == "application/pdf" and model in IMG_ONLY_MODELS:
+            effective_bytes = png_bytes
+            effective_mime = "image/png"
+            effective_filename = (filename or "file.pdf") + " (page1).png"
+
+        t0 = time.time()
+
+        try:
+            # API models: controlled concurrency + async if available
+            if model in API_MODELS:
+                async with API_SEM:
+                    result = await adapter.run_async(
+                        image_bytes=effective_bytes,
+                        filename=effective_filename,
+                        mime_type=effective_mime,
+                    )
+
+            # Heavy local model: controlled concurrency + threadpool
+            elif model in HEAVY_LOCAL_MODELS:
+                async with HEAVY_SEM:
+                    result = await run_in_threadpool(
+                        lambda: adapter.run(
+                            image_bytes=effective_bytes,
+                            filename=effective_filename,
+                            mime_type=effective_mime,
+                        )
+                    )
+
+            # Normal local OCR: run in threadpool so multiple can run together
+            else:
+                result = await run_in_threadpool(
+                    lambda: adapter.run(
+                        image_bytes=effective_bytes,
+                        filename=effective_filename,
+                        mime_type=effective_mime,
+                    )
+                )
+
+        except Exception as e:
+            # return error but do NOT crash whole benchmark
+            return sanitize_for_json(
+                {
+                    "model": model,
+                    "filename": effective_filename,
+                    "mime_type": effective_mime,
+                    "error": repr(e),
+                    "backend_latency_ms": int((time.time() - t0) * 1000),
+                }
+            )
+
+        backend_latency_ms = int((time.time() - t0) * 1000)
+
+        # normalize fields
+        if isinstance(result, dict):
+            result.setdefault("backend_latency_ms", backend_latency_ms)
+            result.setdefault("model", model)
+            result.setdefault("filename", effective_filename)
+            result.setdefault("mime_type", effective_mime)
+        else:
+            result = {
+                "model": model,
+                "filename": effective_filename,
+                "mime_type": effective_mime,
+                "backend_latency_ms": backend_latency_ms,
+                "raw": result,
+            }
+
+        # attach billing
+        result["billing"] = build_billing(
+            model=model,
+            payload=result,
+            file_size_bytes=len(file_bytes) if file_bytes else 0,
+        )
+
+        return sanitize_for_json(result)
+
+    models = list(ADAPTERS.keys())
+
+    # run all models concurrently
+    results_list = await asyncio.gather(*(run_one(m) for m in models))
+
+    # return keyed results for frontend caching
+    results = {}
+    for r in results_list:
+        k = r.get("model", "unknown")
+        results[k] = r
+
+    return {"filename": filename, "mime_type": mime_type, "results": results}
+
+
+# =========================
+# ✅ EXISTING SINGLE-MODEL ENDPOINT (keep it)
+# =========================
 @app.post("/run-ocr")
 async def run_ocr(
     model: str = Form(...),
@@ -165,7 +298,6 @@ async def run_ocr(
     effective_mime = mime_type
     effective_filename = filename
 
-    # If PDF uploaded and model needs image -> convert first page to PNG
     if mime_type == "application/pdf" and model in IMG_ONLY_MODELS:
         effective_bytes = pdf_first_page_to_png_bytes(file_bytes, dpi=200)
         effective_mime = "image/png"
@@ -184,7 +316,6 @@ async def run_ocr(
 
     backend_latency_ms = int((time.time() - t0) * 1000)
 
-    # Ensure frontend always gets these fields
     if isinstance(result, dict):
         result.setdefault("backend_latency_ms", backend_latency_ms)
         result.setdefault("model", model)
@@ -199,8 +330,6 @@ async def run_ocr(
             "raw": result,
         }
 
-    # ✅ NEW: attach unified billing for ALL models (local + api)
-    # Uses runtime-based estimate if no token usage exists
     result["billing"] = build_billing(
         model=model,
         payload=result,

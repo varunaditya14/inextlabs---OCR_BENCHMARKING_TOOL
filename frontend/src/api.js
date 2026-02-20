@@ -1,7 +1,5 @@
 // frontend/src/api.js
 
-// If you set VITE_BACKEND_URL in frontend/.env, it will use that.
-// Otherwise defaults to FastAPI local.
 const BACKEND_URL =
   (import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
 
@@ -14,11 +12,6 @@ async function safeJson(res) {
 }
 
 function normalizeModels(payload) {
-  // Accept:
-  // ["easyocr", ...]
-  // [{id,label}, ...]
-  // {models:[...]}
-  // {data:[...]}
   const list =
     (Array.isArray(payload) && payload) ||
     payload?.models ||
@@ -54,32 +47,23 @@ async function fetchFirstWorking(pathList) {
 
       const data = await safeJson(res);
       const models = normalizeModels(data);
-
-      // even if empty, return it (backend may return [])
       return models;
     } catch (e) {
       lastErr = e;
     }
   }
 
-  // Better message for connection refused / backend not running
   const msg =
     lastErr?.message?.includes("Failed to fetch") ||
     lastErr?.message?.includes("ERR_CONNECTION_REFUSED")
       ? `Backend not reachable at ${BACKEND_URL}. Is FastAPI running on port 8000?`
-      : (lastErr?.message || "Unable to load models from backend");
+      : lastErr?.message || "Unable to load models from backend";
 
   throw new Error(msg);
 }
 
 export async function fetchModels() {
-  // ✅ YOUR BACKEND HAS /models (confirmed by your browser screenshot)
-  return await fetchFirstWorking([
-    "/models",
-    "/ocr/models",
-    "/api/models",
-    "/v1/models",
-  ]);
+  return await fetchFirstWorking(["/models", "/ocr/models", "/api/models", "/v1/models"]);
 }
 
 export async function runOcr(modelId, file) {
@@ -94,11 +78,31 @@ export async function runOcr(modelId, file) {
 
   if (!res.ok) {
     const data = await safeJson(res);
-    const msg =
-      data?.detail ||
-      data?.message ||
-      data?.error ||
-      `HTTP ${res.status}`;
+    const msg = data?.detail || data?.message || data?.error || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+
+  return await res.json();
+}
+
+/**
+ * ✅ NEW: Run ALL models in ONE backend call.
+ * Backend endpoint must exist: POST /run-benchmark
+ * Response shape:
+ *   { filename, mime_type, results: { [modelId]: resultOrErrorObj } }
+ */
+export async function runBenchmark(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+
+  const res = await fetch(`${BACKEND_URL}/run-benchmark`, {
+    method: "POST",
+    body: fd,
+  });
+
+  if (!res.ok) {
+    const data = await safeJson(res);
+    const msg = data?.detail || data?.message || data?.error || `HTTP ${res.status}`;
     throw new Error(msg);
   }
 

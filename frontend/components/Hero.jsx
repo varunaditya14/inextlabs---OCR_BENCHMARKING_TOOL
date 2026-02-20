@@ -1,25 +1,14 @@
 import React from "react";
 
-export default function Hero({ onRun }) {
+export default function Hero() {
   return (
-    <section className="hero">
-      <div className="hero-inner">
-        <p className="hero-kicker">iNextLabs • OCR Benchmark</p>
-
-        <h1 className="hero-title">
-          OCR BENCHMARKING <span className="accent-dot">TOOL</span>
-        </h1>
-
-        <p className="hero-sub">
-          OCR evaluation platform for benchmarking text extraction accuracy, structured outputs, and performance metrics across multiple engines.
-        </p>
-
-        <div className="hero-cta">
-          <button className="cta-btn" onClick={onRun}>
-            Run Benchmark
-          </button>
+    <div className="heroTop">
+      <div className="heroInner">
+        <div className="heroTitle">OCR BENCHMARKING TOOL</div>
+        <div className="heroSubtitle">
+          Upload a document, run all OCR models in one click, and compare outputs instantly.
         </div>
       </div>
-    </section>
+    </div>
   );
 }

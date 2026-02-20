@@ -1,595 +1,488 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import ModelSelect from "./ModelSelect";
-import { fetchModels, runOcr } from "../src/api";
+import React, { useEffect, useMemo, useState } from "react";
+import { fetchModels, runBenchmark } from "../src/api";
 
-export default function OcrPlayground() {
-  const fileInputRef = useRef(null);
+function wordCount(text) {
+  if (!text) return 0;
+  return String(text).trim().split(/\s+/).filter(Boolean).length;
+}
 
-  const [models, setModels] = useState([]);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [modelsError, setModelsError] = useState("");
+function downloadJson(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
-  const [file, setFile] = useState(null);
+/** ✅ Preview modal: LEFT input preview, RIGHT is 2 stacked halves (top text, bottom json) */
+function PreviewModal({ open, onClose, file, isPdf, extractedText, rawJson }) {
+  const [objectUrl, setObjectUrl] = useState("");
 
-  const [modelA, setModelA] = useState("");
-  const [modelB, setModelB] = useState("");
-
-  const [running, setRunning] = useState(false);
-
-  const [left, setLeft] = useState({
-    loading: false,
-    error: "",
-    text: "",
-    json: null,
-    meta: null,
-  });
-
-  const [right, setRight] = useState({
-    loading: false,
-    error: "",
-    text: "",
-    json: null,
-    meta: null,
-  });
-
-  // ---------------------------
-  // Load models
-  // ---------------------------
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        setModelsError("");
-        setLoadingModels(true);
-
-        const list = await fetchModels();
-        if (!mounted) return;
-
-        setModels(list || []);
-
-        const ids = (list || []).map((m) => m.id);
-        if (!modelA && ids.length) setModelA(ids[0]);
-        if (!modelB && ids.length) setModelB(ids[Math.min(1, ids.length - 1)]);
-      } catch (e) {
-        if (!mounted) return;
-        setModels([]);
-        setModelsError((e?.message || "Failed to load models").toString());
-      } finally {
-        if (mounted) setLoadingModels(false);
-      }
-    })();
-
+    if (!open || !file) return;
+    const url = URL.createObjectURL(file);
+    setObjectUrl(url);
     return () => {
-      mounted = false;
+      URL.revokeObjectURL(url);
+      setObjectUrl("");
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [open, file]);
 
-  const canRun = useMemo(() => {
-    return !!file && !!modelA && !!modelB && !running;
-  }, [file, modelA, modelB, running]);
+  if (!open) return null;
 
-  function openFilePicker() {
-    fileInputRef.current?.click();
-  }
-
-  function onPickFile(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-
-    setFile(f);
-    setLeft({ loading: false, error: "", text: "", json: null, meta: null });
-    setRight({ loading: false, error: "", text: "", json: null, meta: null });
-  }
-
-  // ---------------------------
-  // Helpers (metrics)
-  // ---------------------------
-  function countWords(text) {
-    if (!text || typeof text !== "string") return 0;
-    const t = text.trim();
-    if (!t) return 0;
-    return t.split(/\s+/).filter(Boolean).length;
-  }
-
-  function countLines(text) {
-    if (!text || typeof text !== "string") return 0;
-    return text.split("\n").filter((x) => x.trim().length > 0).length;
-  }
-
-  function fmtMs(ms) {
-    if (ms == null || Number.isNaN(ms)) return "—";
-    return `${Math.round(ms)} ms`;
-  }
-
-  function fmtSecondsFromMs(ms) {
-    if (ms == null || Number.isNaN(ms)) return "—";
-    return `${(ms / 1000).toFixed(2)} s`;
-  }
-
-  function fmtNumber(n, decimals = 0) {
-    if (n == null || Number.isNaN(n)) return "—";
-    return Number(n).toFixed(decimals);
-  }
-
-  function fmtFileSize(bytes) {
-    if (bytes == null || Number.isNaN(bytes)) return "—";
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-  }
-
-  function inputTypeFromMime(mime) {
-    const m = (mime || "").toLowerCase();
-    if (m.includes("pdf")) return "PDF";
-    if (m.startsWith("image/")) return "IMAGE";
-    return "FILE";
-  }
-
-  // Pricing table (used only if backend doesn't return cost)
-  const COST_PER_1K_CHARS_USD = {
-    mistral: 0.0001,
-    gemini3: 0.0003,
-    gemini3pro: 0.0006,
-    "glm-ocr": 0.00015,
-    // local defaults:
-    easyocr: 0.0,
-    paddleocr: 0.0,
-    trocr: 0.0,
+  const outSplitStyle = {
+    display: "grid",
+    gridTemplateRows: "1fr 1fr",
+    gap: "12px",
+    height: "100%",
+    minHeight: 0,
+    padding: "12px",
   };
 
-  function computeCostUsd(modelId, chars) {
-    const rate = COST_PER_1K_CHARS_USD[modelId] ?? 0.0;
-    const c = typeof chars === "number" ? chars : 0;
-    return (c / 1000) * rate;
-  }
+  const boxStyle = {
+    border: "1px solid rgba(16,24,40,0.12)",
+    borderRadius: "12px",
+    overflow: "hidden",
+    background: "#fff",
+    display: "grid",
+    gridTemplateRows: "auto 1fr",
+    minHeight: 0,
+  };
 
-  function buildMeta({ res, text, modelId, fileObj, tClientStartMs, tClientEndMs }) {
-    const backendLatencyMs =
-      res?.latency_ms ?? res?.backend_latency_ms ?? res?.backendLatencyMs ?? null;
+  const titleStyle = {
+    padding: "10px 12px",
+    fontWeight: 700,
+    borderBottom: "1px solid rgba(16,24,40,0.08)",
+    background: "rgba(240,87,66,0.05)",
+  };
 
-    const clientElapsedMs =
-      typeof tClientStartMs === "number" && typeof tClientEndMs === "number"
-        ? Math.max(0, tClientEndMs - tClientStartMs)
-        : null;
+  const scrollWrapStyle = {
+    background: "#111827",
+    overflow: "auto",
+    minHeight: 0,
+  };
 
-    const chars = typeof text === "string" ? text.length : 0;
-    const words = countWords(text);
-    const lines = countLines(text);
+  const preStyle = {
+    margin: 0,
+    padding: "10px 12px",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+    fontFamily:
+      'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    fontSize: "13px",
+    lineHeight: 1.5,
+    color: "#e5e7eb",
+  };
 
-    const latencyMs = backendLatencyMs != null ? Number(backendLatencyMs) : null;
-
-    const processingMs = clientElapsedMs != null ? Number(clientElapsedMs) : latencyMs;
-
-    const charsPerSec = processingMs && processingMs > 0 ? chars / (processingMs / 1000) : null;
-
-    const wordsPerSec = processingMs && processingMs > 0 ? words / (processingMs / 1000) : null;
-
-    const avgCharsPerLine = lines > 0 ? chars / lines : null;
-
-    const mime = res?.mime_type ?? fileObj?.type ?? "";
-    const fileSize = fileObj?.size ?? null;
-
-    // cost: prefer backend if it sends it, else compute
-    const backendCost = res?.cost_usd ?? res?.billing?.cost_usd ?? res?.billing?.cost ?? null;
-
-    const costUsd = backendCost != null ? Number(backendCost) : computeCostUsd(modelId, chars);
-
-    const costPer1kChars =
-      chars > 0 ? costUsd / (chars / 1000) : COST_PER_1K_CHARS_USD[modelId] ?? 0.0;
-
-    // tokens: keep in meta if present, but UI request is to REMOVE token tiles
-    const usage = res?.usage || {};
-    const inputTokens = usage?.input_tokens ?? usage?.inputTokens ?? null;
-    const outputTokens = usage?.output_tokens ?? usage?.outputTokens ?? null;
-
-    return {
-      model: res?.model ?? modelId,
-      provider: res?.provider ?? (res?.model ?? modelId),
-
-      latency_ms: latencyMs,
-      processing_ms: processingMs,
-
-      chars,
-      words,
-      lines,
-
-      chars_per_sec: charsPerSec,
-      words_per_sec: wordsPerSec,
-      avg_chars_per_line: avgCharsPerLine,
-
-      input_type: inputTypeFromMime(mime),
-      file_size: fileSize,
-
-      cost_usd: costUsd,
-      cost_per_1k_chars: costPer1kChars,
-
-      // keep raw tokens in meta if available (not displayed)
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-    };
-  }
-
-  // ---------------------------
-  // Run benchmark
-  // ---------------------------
-  async function runBenchmark() {
-    if (!file || !modelA || !modelB) return;
-
-    setRunning(true);
-    setLeft((p) => ({ ...p, loading: true, error: "" }));
-    setRight((p) => ({ ...p, loading: true, error: "" }));
-
-    const startLeft = performance.now();
-    const taskLeft = runOcr(modelA, file).then(
-      (res) => ({ side: "left", ok: true, res, end: performance.now(), start: startLeft }),
-      (err) => ({ side: "left", ok: false, err })
-    );
-
-    const startRight = performance.now();
-    const taskRight = runOcr(modelB, file).then(
-      (res) => ({ side: "right", ok: true, res, end: performance.now(), start: startRight }),
-      (err) => ({ side: "right", ok: false, err })
-    );
-
-    const results = await Promise.all([taskLeft, taskRight]);
-
-    for (const r of results) {
-      if (r.side === "left") {
-        if (r.ok) {
-          const text = r.res?.text ?? r.res?.result?.text ?? "";
-          setLeft({
-            loading: false,
-            error: "",
-            text,
-            json: r.res ?? null,
-            meta: buildMeta({
-              res: r.res,
-              text,
-              modelId: modelA,
-              fileObj: file,
-              tClientStartMs: r.start,
-              tClientEndMs: r.end,
-            }),
-          });
-        } else {
-          setLeft((p) => ({
-            ...p,
-            loading: false,
-            error: (r.err?.message || "MODEL A failed").toString(),
-          }));
-        }
-      } else {
-        if (r.ok) {
-          const text = r.res?.text ?? r.res?.result?.text ?? "";
-          setRight({
-            loading: false,
-            error: "",
-            text,
-            json: r.res ?? null,
-            meta: buildMeta({
-              res: r.res,
-              text,
-              modelId: modelB,
-              fileObj: file,
-              tClientStartMs: r.start,
-              tClientEndMs: r.end,
-            }),
-          });
-        } else {
-          setRight((p) => ({
-            ...p,
-            loading: false,
-            error: (r.err?.message || "MODEL B failed").toString(),
-          }));
-        }
-      }
-    }
-
-    setRunning(false);
-  }
-
-  function downloadJson(side) {
-    const payload = side === "left" ? left.json : right.json;
-    if (!payload) return;
-
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${side === "left" ? "model_a" : "model_b"}_ocr_output.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  const uploadStateClass = running ? "isRunning" : file ? "hasFile" : "";
-
-  // ---------------------------
-  // Metric UI blocks
-  // ---------------------------
-  function MetricTile({ label, value }) {
-    return (
-      <div className="metricCard">
-        <div className="metricLabel">{label}</div>
-        <div className="metricValue">{value}</div>
-      </div>
-    );
-  }
-
-  // ✅ UI-only: now uses CSS class for nicer section title appearance
-  function MetricGroupTitle({ title }) {
-    return <div className="metricsSectionTitle">{title}</div>;
-  }
-
-  // ✅ UI-only: section grouping wrappers to avoid “clustered” look
-  function MetricsBox({ title, meta }) {
-    return (
-      <div className="outputShell" style={{ marginTop: 18 }}>
-        <div className="outputHeader">
-          <span className="outputTab">{title}</span>
-        </div>
-
-        <div style={{ padding: 14, background: "#fff" }}>
-          <div className="metricSectionBlock">
-            <MetricGroupTitle title="Performance" />
-            <div className="metricsRow" style={{ gridTemplateColumns: "repeat(2, 1fr)", marginTop: 0 }}>
-              <MetricTile
-                label="PROCESSING TIME"
-                value={meta?.processing_ms != null ? fmtSecondsFromMs(meta.processing_ms) : "—"}
-              />
-              <MetricTile label="LATENCY" value={meta?.latency_ms != null ? fmtMs(meta.latency_ms) : "—"} />
-              <MetricTile
-                label="CHARS/SEC"
-                value={meta?.chars_per_sec != null ? fmtNumber(meta.chars_per_sec, 0) : "—"}
-              />
-              <MetricTile
-                label="WORDS/SEC"
-                value={meta?.words_per_sec != null ? fmtNumber(meta.words_per_sec, 0) : "—"}
-              />
-            </div>
-          </div>
-
-          <div className="metricSectionBlock">
-            <MetricGroupTitle title="Coverage" />
-            <div className="metricsRow" style={{ gridTemplateColumns: "repeat(2, 1fr)", marginTop: 0 }}>
-              <MetricTile label="CHARS" value={meta?.chars ?? "—"} />
-              <MetricTile label="WORDS" value={meta?.words ?? "—"} />
-              <MetricTile label="LINES" value={meta?.lines ?? "—"} />
-              <MetricTile
-                label="AVG CHARS/LINE"
-                value={meta?.avg_chars_per_line != null ? fmtNumber(meta.avg_chars_per_line, 1) : "—"}
-              />
-            </div>
-          </div>
-
-          <div className="metricSectionBlock">
-            <MetricGroupTitle title="Run Info" />
-            <div className="metricsRow" style={{ gridTemplateColumns: "repeat(2, 1fr)", marginTop: 0 }}>
-              <MetricTile label="INPUT TYPE" value={meta?.input_type ?? "—"} />
-              <MetricTile label="FILE SIZE" value={fmtFileSize(meta?.file_size)} />
-              <MetricTile label="MODEL" value={meta?.model ?? "—"} />
-              <MetricTile label="PROVIDER" value={meta?.provider ?? "—"} />
-            </div>
-          </div>
-
-          <div className="metricSectionBlock">
-            <MetricGroupTitle title="Cost" />
-            <div className="metricsRow" style={{ gridTemplateColumns: "repeat(2, 1fr)", marginTop: 0 }}>
-              <MetricTile
-                label="COST (USD)"
-                value={meta?.cost_usd != null ? `$${Number(meta.cost_usd).toFixed(6)}` : "—"}
-              />
-
-              <MetricTile
-                label="COST / 1K CHARS"
-                value={meta?.cost_per_1k_chars != null ? `$${Number(meta.cost_per_1k_chars).toFixed(4)}` : "—"}
-              />
-
-              {/* ✅ REMOVED (as you asked)
-                  - INPUT TOKENS
-                  - OUTPUT TOKENS
-              */}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ---------------------------
-  // UI
-  // ---------------------------
   return (
-    <div className="benchPage">
-      <div className="benchContainer">
-        <input
-          ref={fileInputRef}
-          className="hiddenInput"
-          type="file"
-          accept="image/*,application/pdf"
-          onChange={onPickFile}
-        />
-
-        <header className="heroHeader">
-          <div className="heroTitle">OCR BENCHMARKING TOOL</div>
-          <div className="heroTagline">Upload. Compare. models side-by-side. Export clean outputs.</div>
-        </header>
-
-        {modelsError ? <div className="miniBannerError">{modelsError}</div> : null}
-
-        <div className="benchTopBar">
-          <button className="runBtn" onClick={runBenchmark} disabled={!canRun}>
-            {running ? "RUNNING..." : "RUN BENCHMARK"}
+    <div className="pvOverlay" onMouseDown={onClose}>
+      <div className="pvModal" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="pvHeader">
+          <div className="pvTitle">Input &amp; Output Preview</div>
+          <button className="pvClose" onClick={onClose} aria-label="Close">
+            ×
           </button>
         </div>
 
-        <div className="benchGrid">
-          {/* LEFT CARD */}
-          <section className="benchCard">
-            <div className="benchCard__top">
-              <div className="benchTitle">
-                <div className="benchTitle__main">MODEL A</div>
+        <div className="pvBody">
+          {/* LEFT */}
+          <div className="pvPane">
+            <div className="pvPaneTitle">Input File</div>
+            <div className="pvPaneInner">
+              {file ? (
+                isPdf ? (
+                  <iframe className="pvFrame" src={objectUrl} title="PDF Preview" />
+                ) : (
+                  <img className="pvImg" src={objectUrl} alt="Input Preview" />
+                )
+              ) : (
+                <div className="pvEmpty">No file</div>
+              )}
+            </div>
+          </div>
+
+          {/* RIGHT */}
+          <div className="pvPane">
+            <div className="pvPaneTitle">Output</div>
+
+            <div style={outSplitStyle}>
+              {/* TOP: Extracted */}
+              <div style={boxStyle}>
+                <div style={titleStyle}>Extracted Text</div>
+                <div style={scrollWrapStyle}>
+                  <pre style={preStyle}>{extractedText || ""}</pre>
+                </div>
               </div>
 
-              <div className="benchTopRight">
-                <ModelSelect
-                  label=""
-                  value={modelA}
-                  onChange={setModelA}
-                  options={models}
-                  disabled={loadingModels || running}
-                />
+              {/* BOTTOM: JSON */}
+              <div style={boxStyle}>
+                <div style={titleStyle}>Raw JSON</div>
+                <div style={scrollWrapStyle}>
+                  <pre style={preStyle}>{JSON.stringify(rawJson || {}, null, 2)}</pre>
+                </div>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-            <div className="benchDivider" />
+export default function OcrPlayground() {
+  const [models, setModels] = useState([]);
+  const [selectedModel, setSelectedModel] = useState("");
 
-            <div className="benchBody">
-              <div className="outputShell">
-                <div className="outputHeader">
-                  <span className="outputTab">EXTRACTED TEXT</span>
-                  <button className="ghostBtn" onClick={() => downloadJson("left")} disabled={!left.json}>
-                    Download JSON
+  const [file, setFile] = useState(null);
+  const [executing, setExecuting] = useState(false);
+  const [executed, setExecuted] = useState(false);
+
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  const [resultsByModel, setResultsByModel] = useState({});
+
+  useEffect(() => {
+    (async () => {
+      const list = await fetchModels();
+      setModels(list || []);
+      if (list?.length) setSelectedModel((prev) => prev || list[0].id);
+    })();
+  }, []);
+
+  const fileMeta = useMemo(() => {
+    if (!file) return null;
+    return { name: file.name, size: file.size, type: file.type || "unknown" };
+  }, [file]);
+
+  const isPdf = useMemo(() => {
+    if (!fileMeta?.name) return false;
+    return (fileMeta.type || "").includes("pdf") || fileMeta.name.toLowerCase().endsWith(".pdf");
+  }, [fileMeta]);
+
+  const selectedEntry = selectedModel ? resultsByModel[selectedModel] : null;
+  const selectedResult = selectedEntry?.result || null;
+  const selectedError = selectedEntry?.error || null;
+
+  const summaryMetrics = useMemo(() => {
+    if (!selectedResult) return null;
+
+    const latencyMs = selectedResult?.latency_ms ?? selectedResult?.backend_latency_ms ?? null;
+    const text = selectedResult?.text ?? "";
+    const chars = text.length;
+    const words = wordCount(text);
+
+    // backend normalizes as `lines` most of the time; your earlier doc used `Lines`
+    const linesArr =
+      Array.isArray(selectedResult?.lines) ? selectedResult.lines :
+      Array.isArray(selectedResult?.Lines) ? selectedResult.Lines :
+      null;
+
+    const lines = linesArr ? linesArr.length : 0;
+
+    const seconds = latencyMs ? latencyMs / 1000 : null;
+    const charsPerSec = seconds ? Math.round(chars / seconds) : null;
+
+    const billing = selectedResult?.billing || {};
+    const costUsd = typeof billing?.cost_usd === "number" ? billing.cost_usd : null;
+    const costPer1k =
+      typeof billing?.cost_per_1k_chars_usd === "number" ? billing.cost_per_1k_chars_usd : null;
+
+    return {
+      latencyMs: latencyMs != null ? `${Math.round(latencyMs)} ms` : "—",
+      chars: chars ? `${chars}` : "—",
+      words: words ? `${words}` : "—",
+      lines: lines ? `${lines}` : "—",
+      charsPerSec: charsPerSec != null ? `${charsPerSec}` : "—",
+      costUsd: costUsd != null ? `$${costUsd.toFixed(6)}` : "—",
+      costPer1k: costPer1k != null ? `$${costPer1k.toFixed(6)}` : "—",
+    };
+  }, [selectedResult]);
+
+  function resetRunState() {
+    setExecuted(false);
+    setResultsByModel({});
+  }
+
+  function onPickFile(f) {
+    setFile(f);
+    resetRunState();
+  }
+
+  function removeFile() {
+    setFile(null);
+    resetRunState();
+    setIsPreviewOpen(false);
+  }
+
+  /**
+   * ✅ NEW: One backend call runs ALL models concurrently.
+   * Results are returned already keyed by model.
+   */
+  async function executeAllModels() {
+    if (!file || !models.length || executing) return;
+
+    setExecuting(true);
+    setExecuted(false);
+
+    // show running state immediately (same UI behavior as before)
+    const init = {};
+    models.forEach((m) => {
+      init[m.id] = { status: "running", result: null, error: null };
+    });
+    setResultsByModel(init);
+
+    try {
+      const payload = await runBenchmark(file);
+      const results = payload?.results || {};
+
+      setResultsByModel((prev) => {
+        const next = { ...prev };
+
+        // Ensure we fill every model row even if backend returns missing model keys
+        models.forEach((m) => {
+          const r = results[m.id];
+
+          if (!r) {
+            next[m.id] = {
+              status: "error",
+              result: null,
+              error: "No result returned",
+            };
+            return;
+          }
+
+          if (r?.error) {
+            next[m.id] = {
+              status: "error",
+              result: null,
+              error: String(r.error),
+            };
+            return;
+          }
+
+          next[m.id] = { status: "success", result: r, error: null };
+        });
+
+        return next;
+      });
+
+      setExecuted(true);
+    } catch (e) {
+      // If the whole benchmark call fails, mark all as failed
+      const msg = e?.message || "Benchmark failed";
+      setResultsByModel((prev) => {
+        const next = { ...prev };
+        models.forEach((m) => {
+          next[m.id] = { status: "error", result: null, error: msg };
+        });
+        return next;
+      });
+      setExecuted(false);
+    } finally {
+      setExecuting(false);
+    }
+  }
+
+  return (
+    <div className="wb2">
+      <div className="wb2Grid">
+        {/* INPUT PANEL */}
+        <section className="panel2">
+          <div className="panel2Header">
+            <div className="panel2Title">Input Panel</div>
+          </div>
+
+          <div className="panel2Body">
+            <div className="uploadWrap">
+              {!file ? (
+                <label className="dropzone2">
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) onPickFile(f);
+                    }}
+                    style={{ display: "none" }}
+                  />
+                  <div className="dz2Icon">
+                    <div className="dz2IconDoc" />
+                  </div>
+                  <div className="dz2Title">Upload Image or PDF</div>
+                  <div className="dz2Hint">Click to browse</div>
+                </label>
+              ) : (
+                <div className="fileCard2">
+                  <div className={`tickBadge ${executing ? "tickBadge--hide" : "tickBadge--show"}`}>
+                    <svg viewBox="0 0 24 24" className="tickIcon" aria-hidden="true">
+                      <path
+                        d="M20 6L9 17l-5-5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+
+                  <div className="filePreviewBox">
+                    <div className="fileDocIcon2">
+                      <svg viewBox="0 0 24 24" className="docSvg" aria-hidden="true">
+                        <path
+                          d="M14 2H7a3 3 0 0 0-3 3v14a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V8l-6-6z"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M14 2v6h6"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                    <div className="fileDocLabel">{isPdf ? "PDF Document" : "Image File"}</div>
+                  </div>
+
+                  <div className="fileName2">{fileMeta?.name}</div>
+
+                  <button className="btnRemove2" onClick={removeFile} disabled={executing}>
+                    Remove File
                   </button>
-                </div>
 
-                <div className="outputArea">
-                  {left.loading ? (
-                    <div className="stateText">Processing…</div>
-                  ) : left.error ? (
-                    <div className="stateError">{left.error}</div>
-                  ) : left.text ? (
-                    <pre className="monoPre">{left.text}</pre>
-                  ) : (
-                    <div className="stateText">Upload a file and run benchmark.</div>
-                  )}
+                  <div className="fileReplaceHint">or drag & drop another file to replace</div>
                 </div>
-              </div>
-
-              <div className="outputShell">
-                <div className="outputHeader">
-                  <span className="outputTab">RAW JSON</span>
-                </div>
-
-                <div className="outputArea">
-                  {left.loading ? (
-                    <div className="stateText">Waiting…</div>
-                  ) : left.json ? (
-                    <pre className="monoPre">{JSON.stringify(left.json, null, 2)}</pre>
-                  ) : (
-                    <div className="stateText">JSON will appear here.</div>
-                  )}
-                </div>
-              </div>
+              )}
             </div>
-          </section>
 
-          {/* CENTER UPLOAD */}
-          <div className="benchCenter">
+            <div className={`successBar ${executed ? "successBar--show" : ""}`}>
+              <div className="successBarFill" />
+              <div className="successBarText">Executed — Change config or file to re-run</div>
+            </div>
+          </div>
+
+          <div className="panel2Footer panel2FooterCenter">
             <button
-              className={`uploadArrow ${uploadStateClass}`}
-              onClick={openFilePicker}
-              title={file ? `Selected: ${file.name}` : "Upload file"}
-              aria-label="Upload file"
+              className={`btnExecute2 ${executed ? "btnExecute2--done" : ""}`}
+              onClick={executeAllModels}
+              disabled={!file || executing || !models.length}
             >
-              <span className="uploadRing" aria-hidden="true" />
-              <svg className="uploadIcon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M12 3v10" stroke="white" strokeWidth="2.4" strokeLinecap="round" />
-                <path
-                  d="M8.5 6.5 12 3l3.5 3.5"
-                  stroke="white"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M4 14.5v4A2.5 2.5 0 0 0 6.5 21h11A2.5 2.5 0 0 0 20 18.5v-4"
-                  stroke="white"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                />
-              </svg>
+              {executing ? "Executing…" : executed ? "Executed" : "Execute"}
             </button>
           </div>
+        </section>
 
-          {/* RIGHT CARD */}
-          <section className="benchCard">
-            <div className="benchCard__top">
-              <div className="benchTitle">
-                <div className="benchTitle__main">MODEL B</div>
+        {/* OUTPUT PANEL */}
+        <section className="panel2">
+          <div className="panel2Header panel2HeaderRow">
+            <div className="panel2Title">Output Panel</div>
+
+            <div className="panel2HeaderRight">
+              <select
+                className="modelSelect2"
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                disabled={!models.length}
+              >
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label || m.id}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                className="btnGhost2"
+                type="button"
+                disabled={!file}
+                onClick={() => setIsPreviewOpen(true)}
+              >
+                Preview
+              </button>
+
+              <button
+                className="btnPrimary2"
+                type="button"
+                disabled={!selectedResult}
+                onClick={() => {
+                  if (!selectedResult) return;
+                  downloadJson(
+                    `${selectedModel || "model"}_${fileMeta?.name || "output"}.json`,
+                    selectedResult?.raw ?? selectedResult
+                  );
+                }}
+              >
+                Download JSON
+              </button>
+            </div>
+          </div>
+
+          <div className="panel2Body">
+            <div className="outputTopLine">
+              {selectedError
+                ? "Selected model failed"
+                : selectedResult
+                ? "Output ready — open Preview for details"
+                : executing
+                ? "Running all models…"
+                : "No output yet"}
+            </div>
+
+            <div className="metricsTitle2">Key Metrics </div>
+
+            <div className="metricsGrid2">
+              <div className="metricBox2">
+                <div className="metricLabel2">Latency</div>
+                <div className="metricValue2">{summaryMetrics?.latencyMs || "—"}</div>
               </div>
 
-              <div className="benchTopRight">
-                <ModelSelect
-                  label=""
-                  value={modelB}
-                  onChange={setModelB}
-                  options={models}
-                  disabled={loadingModels || running}
-                />
+              <div className="metricBox2">
+                <div className="metricLabel2">Chars Processed</div>
+                <div className="metricValue2">{summaryMetrics?.chars || "—"}</div>
+              </div>
+
+              <div className="metricBox2">
+                <div className="metricLabel2">Words</div>
+                <div className="metricValue2">{summaryMetrics?.words || "—"}</div>
+              </div>
+
+              <div className="metricBox2">
+                <div className="metricLabel2">Lines</div>
+                <div className="metricValue2">{summaryMetrics?.lines || "—"}</div>
+              </div>
+
+              <div className="metricBox2">
+                <div className="metricLabel2">Chars / Sec</div>
+                <div className="metricValue2">{summaryMetrics?.charsPerSec || "—"}</div>
+              </div>
+
+              <div className="metricBox2">
+                <div className="metricLabel2">Cost (USD)</div>
+                <div className="metricValue2">{summaryMetrics?.costUsd || "—"}</div>
+                <div className="metricSub2">Cost / 1K chars: {summaryMetrics?.costPer1k || "—"}</div>
               </div>
             </div>
 
-            <div className="benchDivider" />
-
-            <div className="benchBody">
-              <div className="outputShell">
-                <div className="outputHeader">
-                  <span className="outputTab">EXTRACTED TEXT</span>
-                  <button className="ghostBtn" onClick={() => downloadJson("right")} disabled={!right.json}>
-                    Download JSON
-                  </button>
-                </div>
-
-                <div className="outputArea">
-                  {right.loading ? (
-                    <div className="stateText">Processing…</div>
-                  ) : right.error ? (
-                    <div className="stateError">{right.error}</div>
-                  ) : right.text ? (
-                    <pre className="monoPre">{right.text}</pre>
-                  ) : (
-                    <div className="stateText">Upload a file and run benchmark.</div>
-                  )}
-                </div>
-              </div>
-
-              <div className="outputShell">
-                <div className="outputHeader">
-                  <span className="outputTab">RAW JSON</span>
-                </div>
-
-                <div className="outputArea">
-                  {right.loading ? (
-                    <div className="stateText">Waiting…</div>
-                  ) : right.json ? (
-                    <pre className="monoPre">{JSON.stringify(right.json, null, 2)}</pre>
-                  ) : (
-                    <div className="stateText">JSON will appear here.</div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        {/* ✅ Separate metrics boxes under each side */}
-        <div className="benchGrid" style={{ marginTop: 18 }}>
-          <div>
-            <MetricsBox title="MODEL A METRICS" meta={left.meta} />
+            <PreviewModal
+              open={isPreviewOpen}
+              onClose={() => setIsPreviewOpen(false)}
+              file={file}
+              isPdf={isPdf}
+              extractedText={selectedResult?.text || (selectedError ? String(selectedError) : "")}
+              rawJson={selectedResult?.raw ?? selectedResult ?? { error: selectedError || "No output" }}
+            />
           </div>
-
-          <div />
-
-          <div>
-            <MetricsBox title="MODEL B METRICS" meta={right.meta} />
-          </div>
-        </div>
+        </section>
       </div>
     </div>
   );

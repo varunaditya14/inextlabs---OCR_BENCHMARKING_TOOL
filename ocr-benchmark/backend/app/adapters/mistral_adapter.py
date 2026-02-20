@@ -8,12 +8,6 @@ from .base import OCRAdapter
 
 
 def _clean_endpoint(raw: str) -> str:
-    """
-    Fix common endpoint copy/paste issues:
-    - Removes surrounding quotes
-    - Removes URL-encoded %27 (')
-    - Removes trailing slashes
-    """
     if not raw:
         return ""
     s = raw.strip().strip('"').strip("'")
@@ -22,10 +16,25 @@ def _clean_endpoint(raw: str) -> str:
     return s
 
 
+def _text_to_lines(text: str) -> List[Dict[str, Any]]:
+    """
+    Convert extracted text into standardized lines array.
+    Keeps line breaks; filters empty lines.
+    """
+    if not text:
+        return []
+    t = str(text).replace("\r", "").strip()
+    if not t:
+        return []
+    parts = [ln.strip() for ln in t.split("\n")]
+    parts = [ln for ln in parts if ln]
+    return [{"text": ln, "score": None, "box": None} for ln in parts]
+
+
 class MistralOCRAdapter(OCRAdapter):
     """
-    Calls Azure-hosted Mistral OCR endpoint (as given by curl).
-    Expects backend/.env keys:
+    Calls Azure-hosted Mistral OCR endpoint.
+    Needs backend/.env:
       MISTRAL_OCR_ENDPOINT
       MISTRAL_OCR_TOKEN
       MISTRAL_OCR_MODEL (optional)
@@ -41,8 +50,6 @@ class MistralOCRAdapter(OCRAdapter):
         if not self.token:
             raise RuntimeError("MISTRAL_OCR_TOKEN is missing in backend/.env")
 
-        print("ENDPOINT USED =>", self.endpoint)
-
     @property
     def name(self) -> str:
         return "mistral"
@@ -54,13 +61,6 @@ class MistralOCRAdapter(OCRAdapter):
         mime_type: str = "",
         **kwargs
     ) -> Dict[str, Any]:
-        """
-        Accept bytes under common keys:
-          - image_bytes (preferred)
-          - file_bytes (from main.py)
-          - bytes/image/content/data (fallback)
-        """
-        # Accept bytes from various keys depending on main.py / older code
         if image_bytes is None:
             for key in ("file_bytes", "bytes", "image", "content", "data"):
                 if key in kwargs and kwargs[key] is not None:
@@ -75,10 +75,7 @@ class MistralOCRAdapter(OCRAdapter):
 
         t0 = time.time()
 
-        # Base64 encode uploaded file bytes (image OR pdf)
         b64 = base64.b64encode(image_bytes).decode("utf-8")
-
-        # Decide data URL based on uploaded file type
         mime_type = (mime_type or "").strip() or "image/png"
 
         if mime_type == "application/pdf":
@@ -88,11 +85,8 @@ class MistralOCRAdapter(OCRAdapter):
 
         payload = {
             "model": self.model,
-            "document": {
-                "type": "document_url",
-                "document_url": data_url
-            },
-            "include_image_base64": True
+            "document": {"type": "document_url", "document_url": data_url},
+            "include_image_base64": True,
         }
 
         headers = {
@@ -100,7 +94,6 @@ class MistralOCRAdapter(OCRAdapter):
             "Authorization": f"Bearer {self.token}",
         }
 
-        # Request
         try:
             resp = requests.post(self.endpoint, headers=headers, json=payload, timeout=120)
         except Exception as e:
@@ -109,18 +102,14 @@ class MistralOCRAdapter(OCRAdapter):
         if resp.status_code >= 400:
             raise RuntimeError(f"Mistral OCR HTTP {resp.status_code}: {resp.text[:2000]}")
 
-        # Parse JSON
         try:
             data = resp.json()
         except Exception:
             raise RuntimeError(f"Mistral OCR returned non-JSON response: {resp.text[:2000]}")
 
-        latency_ms = (time.time() - t0) * 1000.0
+        latency_ms = int((time.time() - t0) * 1000)
 
-        # Extract text
         extracted_text = ""
-
-        # Common format: pages -> [{ markdown: "..." }]
         if isinstance(data, dict):
             pages = data.get("pages")
             if isinstance(pages, list):
@@ -133,7 +122,6 @@ class MistralOCRAdapter(OCRAdapter):
                 if chunks:
                     extracted_text = "\n\n".join(chunks)
 
-            # Fallback keys
             if not extracted_text:
                 for k in ("text", "extracted_text", "content"):
                     v = data.get(k)
@@ -141,13 +129,16 @@ class MistralOCRAdapter(OCRAdapter):
                         extracted_text = v.strip()
                         break
 
+        lines = _text_to_lines(extracted_text)
+
         return {
-            "model": self.name,                 # frontend uses this
+            "model": self.name,
             "filename": filename,
             "mime_type": mime_type,
-            "backend_latency_ms": float(latency_ms),   # frontend metrics reads this
-            "latency_ms": float(latency_ms),           # also keep this for json
-            "raw": data,
+            "backend_latency_ms": latency_ms,
+            "latency_ms": latency_ms,
             "text": extracted_text,
-            "lines": []  # keep empty for now; we'll fill in Step-2 (structured output)
+            "lines": lines,                 # ✅ now correct for frontend
+            "line_count": len(lines),
+            "raw": data,
         }
