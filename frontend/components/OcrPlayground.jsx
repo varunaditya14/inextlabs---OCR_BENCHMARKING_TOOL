@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { fetchModels, runBenchmark } from "../src/api";
+import ExtractedTextBox from "./ExtractedTextBox";
 
 function wordCount(text) {
   if (!text) return 0;
@@ -175,13 +176,14 @@ export default function OcrPlayground() {
     const chars = text.length;
     const words = wordCount(text);
 
-    // backend normalizes as `lines` most of the time; your earlier doc used `Lines`
     const linesArr =
-      Array.isArray(selectedResult?.lines) ? selectedResult.lines :
-      Array.isArray(selectedResult?.Lines) ? selectedResult.Lines :
-      null;
+      Array.isArray(selectedResult?.lines)
+        ? selectedResult.lines
+        : Array.isArray(selectedResult?.Lines)
+        ? selectedResult.Lines
+        : null;
 
-    const lines = linesArr ? linesArr.length : 0;
+    const lines = linesArr ? linesArr.length : text ? text.split(/\r?\n/).length : 0;
 
     const seconds = latencyMs ? latencyMs / 1000 : null;
     const charsPerSec = seconds ? Math.round(chars / seconds) : null;
@@ -218,17 +220,12 @@ export default function OcrPlayground() {
     setIsPreviewOpen(false);
   }
 
-  /**
-   * ✅ NEW: One backend call runs ALL models concurrently.
-   * Results are returned already keyed by model.
-   */
   async function executeAllModels() {
     if (!file || !models.length || executing) return;
 
     setExecuting(true);
     setExecuted(false);
 
-    // show running state immediately (same UI behavior as before)
     const init = {};
     models.forEach((m) => {
       init[m.id] = { status: "running", result: null, error: null };
@@ -242,25 +239,16 @@ export default function OcrPlayground() {
       setResultsByModel((prev) => {
         const next = { ...prev };
 
-        // Ensure we fill every model row even if backend returns missing model keys
         models.forEach((m) => {
           const r = results[m.id];
 
           if (!r) {
-            next[m.id] = {
-              status: "error",
-              result: null,
-              error: "No result returned",
-            };
+            next[m.id] = { status: "error", result: null, error: "No result returned" };
             return;
           }
 
           if (r?.error) {
-            next[m.id] = {
-              status: "error",
-              result: null,
-              error: String(r.error),
-            };
+            next[m.id] = { status: "error", result: null, error: String(r.error) };
             return;
           }
 
@@ -272,7 +260,6 @@ export default function OcrPlayground() {
 
       setExecuted(true);
     } catch (e) {
-      // If the whole benchmark call fails, mark all as failed
       const msg = e?.message || "Benchmark failed";
       setResultsByModel((prev) => {
         const next = { ...prev };
@@ -289,8 +276,12 @@ export default function OcrPlayground() {
 
   return (
     <div className="wb2">
-      <div className="wb2Grid">
-        {/* INPUT PANEL */}
+      {/* keep Output below Input (no CSS change) */}
+      <div
+        className="wb2Grid"
+        style={{ display: "grid", gridTemplateColumns: "1fr", gap: "24px" }}
+      >
+        {/* INPUT PANEL (UNCHANGED) */}
         <section className="panel2">
           <div className="panel2Header">
             <div className="panel2Title">Input Panel</div>
@@ -432,44 +423,65 @@ export default function OcrPlayground() {
               {selectedError
                 ? "Selected model failed"
                 : selectedResult
-                ? "Output ready — open Preview for details"
+                ? ""
                 : executing
                 ? "Running all models…"
                 : "No output yet"}
             </div>
 
-            <div className="metricsTitle2">Key Metrics </div>
-
-            <div className="metricsGrid2">
-              <div className="metricBox2">
-                <div className="metricLabel2">Latency</div>
-                <div className="metricValue2">{summaryMetrics?.latencyMs || "—"}</div>
+            {/* ✅ Split bottom area into 2 columns: LEFT text, RIGHT metrics */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "16px",
+                alignItems: "start",
+                marginTop: "12px",
+              }}
+            >
+              {/* LEFT */}
+              <div>
+                <ExtractedTextBox result={selectedResult} />
               </div>
 
-              <div className="metricBox2">
-                <div className="metricLabel2">Chars Processed</div>
-                <div className="metricValue2">{summaryMetrics?.chars || "—"}</div>
-              </div>
+              {/* RIGHT */}
+              <div>
+                <div className="metricsTitle2">Key Metrics</div>
 
-              <div className="metricBox2">
-                <div className="metricLabel2">Words</div>
-                <div className="metricValue2">{summaryMetrics?.words || "—"}</div>
-              </div>
+                <div className="metricsGrid2">
+                  <div className="metricBox2">
+                    <div className="metricLabel2">Latency</div>
+                    <div className="metricValue2">{summaryMetrics?.latencyMs || "—"}</div>
+                  </div>
 
-              <div className="metricBox2">
-                <div className="metricLabel2">Lines</div>
-                <div className="metricValue2">{summaryMetrics?.lines || "—"}</div>
-              </div>
+                  <div className="metricBox2">
+                    <div className="metricLabel2">Chars Processed</div>
+                    <div className="metricValue2">{summaryMetrics?.chars || "—"}</div>
+                  </div>
 
-              <div className="metricBox2">
-                <div className="metricLabel2">Chars / Sec</div>
-                <div className="metricValue2">{summaryMetrics?.charsPerSec || "—"}</div>
-              </div>
+                  <div className="metricBox2">
+                    <div className="metricLabel2">Words</div>
+                    <div className="metricValue2">{summaryMetrics?.words || "—"}</div>
+                  </div>
 
-              <div className="metricBox2">
-                <div className="metricLabel2">Cost (USD)</div>
-                <div className="metricValue2">{summaryMetrics?.costUsd || "—"}</div>
-                <div className="metricSub2">Cost / 1K chars: {summaryMetrics?.costPer1k || "—"}</div>
+                  <div className="metricBox2">
+                    <div className="metricLabel2">Lines</div>
+                    <div className="metricValue2">{summaryMetrics?.lines || "—"}</div>
+                  </div>
+
+                  <div className="metricBox2">
+                    <div className="metricLabel2">Chars / Sec</div>
+                    <div className="metricValue2">{summaryMetrics?.charsPerSec || "—"}</div>
+                  </div>
+
+                  <div className="metricBox2">
+                    <div className="metricLabel2">Cost (USD)</div>
+                    <div className="metricValue2">{summaryMetrics?.costUsd || "—"}</div>
+                    <div className="metricSub2">
+                      Cost / 1K chars: {summaryMetrics?.costPer1k || "—"}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
