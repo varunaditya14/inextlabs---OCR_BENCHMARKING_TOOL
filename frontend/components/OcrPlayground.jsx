@@ -19,9 +19,28 @@ function downloadJson(filename, data) {
   URL.revokeObjectURL(url);
 }
 
-/** ✅ Preview modal: LEFT input preview, RIGHT is 2 stacked halves (top text, bottom json) */
-function PreviewModal({ open, onClose, file, isPdf, extractedText, rawJson }) {
+/** ✅ Preview modal: LEFT input preview, RIGHT is 2 stacked halves (top text, bottom json)
+ *  NEW:
+ *   - model select inside header
+ *   - fullscreen toggle
+ *   - expand extracted/raw panels within modal
+ */
+function PreviewModal({
+  open,
+  onClose,
+  file,
+  isPdf,
+  extractedText,
+  rawJson,
+  models,
+  selectedModel,
+  onSelectModel,
+}) {
   const [objectUrl, setObjectUrl] = useState("");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // null | "text" | "json"
+  const [expandedPane, setExpandedPane] = useState(null);
 
   useEffect(() => {
     if (!open || !file) return;
@@ -33,11 +52,58 @@ function PreviewModal({ open, onClose, file, isPdf, extractedText, rawJson }) {
     };
   }, [open, file]);
 
+  // When closing, reset fullscreen/pane for clean reopen
+  useEffect(() => {
+    if (!open) {
+      setIsFullscreen(false);
+      setExpandedPane(null);
+    }
+  }, [open]);
+
   if (!open) return null;
 
+  const headerRightStyle = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "10px",
+  };
+
+  const iconBtnStyle = {
+    height: "34px",
+    minWidth: "34px",
+    padding: "0 10px",
+    borderRadius: "10px",
+    border: "1px solid rgba(16,24,40,0.12)",
+    background: "#fff",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    lineHeight: 1,
+    fontWeight: 800,
+    userSelect: "none",
+  };
+
+  const iconBtnStyleGhost = {
+    ...iconBtnStyle,
+    background: "rgba(240,87,66,0.05)",
+    border: "1px solid rgba(240,87,66,0.18)",
+  };
+
+  const modalStyle = isFullscreen
+    ? {
+        width: "100vw",
+        height: "100vh",
+        maxWidth: "100vw",
+        maxHeight: "100vh",
+        borderRadius: 0,
+      }
+    : undefined;
+
+  // Right-side split (text + json)
   const outSplitStyle = {
     display: "grid",
-    gridTemplateRows: "1fr 1fr",
+    gridTemplateRows: expandedPane ? "1fr" : "1fr 1fr",
     gap: "12px",
     height: "100%",
     minHeight: 0,
@@ -59,6 +125,39 @@ function PreviewModal({ open, onClose, file, isPdf, extractedText, rawJson }) {
     fontWeight: 700,
     borderBottom: "1px solid rgba(16,24,40,0.08)",
     background: "rgba(240,87,66,0.05)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+  };
+
+  const panelTitleLeftStyle = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "8px",
+    minWidth: 0,
+  };
+
+  const panelTitleRightStyle = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "8px",
+  };
+
+  const smallIconBtnStyle = {
+    height: "28px",
+    minWidth: "28px",
+    padding: "0 8px",
+    borderRadius: "9px",
+    border: "1px solid rgba(16,24,40,0.12)",
+    background: "#fff",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    lineHeight: 1,
+    fontWeight: 900,
+    userSelect: "none",
   };
 
   const scrollWrapStyle = {
@@ -79,14 +178,59 @@ function PreviewModal({ open, onClose, file, isPdf, extractedText, rawJson }) {
     color: "#e5e7eb",
   };
 
+  const toggleExpand = (which) => {
+    setExpandedPane((prev) => (prev === which ? null : which));
+  };
+
   return (
-    <div className="pvOverlay" onMouseDown={onClose}>
-      <div className="pvModal" onMouseDown={(e) => e.stopPropagation()}>
+    <div
+      className="pvOverlay"
+      onMouseDown={() => {
+        onClose();
+      }}
+    >
+      <div
+        className="pvModal"
+        style={modalStyle}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <div className="pvHeader">
           <div className="pvTitle">Input &amp; Output Preview</div>
-          <button className="pvClose" onClick={onClose} aria-label="Close">
-            ×
-          </button>
+
+          {/* ✅ NEW: model select + fullscreen + close */}
+          <div style={headerRightStyle}>
+            <select
+              className="modelSelect2"
+              value={selectedModel}
+              onChange={(e) => onSelectModel?.(e.target.value)}
+              disabled={!models?.length}
+              style={{
+                height: "34px",
+                minWidth: "180px",
+              }}
+              aria-label="Select model (preview)"
+            >
+              {(models || []).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label || m.id}
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              style={iconBtnStyleGhost}
+              onClick={() => setIsFullscreen((v) => !v)}
+              aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+              title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+            >
+              {isFullscreen ? "⤡" : "⤢"}
+            </button>
+
+            <button className="pvClose" onClick={onClose} aria-label="Close" title="Close">
+              ×
+            </button>
+          </div>
         </div>
 
         <div className="pvBody">
@@ -112,20 +256,50 @@ function PreviewModal({ open, onClose, file, isPdf, extractedText, rawJson }) {
 
             <div style={outSplitStyle}>
               {/* TOP: Extracted */}
-              <div style={boxStyle}>
-                <div style={titleStyle}>Extracted Text</div>
-                <div style={scrollWrapStyle}>
-                  <pre style={preStyle}>{extractedText || ""}</pre>
+              {(expandedPane === null || expandedPane === "text") && (
+                <div style={boxStyle}>
+                  <div style={titleStyle}>
+                    <div style={panelTitleLeftStyle}>Extracted Text</div>
+                    <div style={panelTitleRightStyle}>
+                      <button
+                        type="button"
+                        style={smallIconBtnStyle}
+                        onClick={() => toggleExpand("text")}
+                        aria-label={expandedPane === "text" ? "Collapse Extracted Text" : "Expand Extracted Text"}
+                        title={expandedPane === "text" ? "Collapse" : "Expand"}
+                      >
+                        {expandedPane === "text" ? "⤡" : "⤢"}
+                      </button>
+                    </div>
+                  </div>
+                  <div style={scrollWrapStyle}>
+                    <pre style={preStyle}>{extractedText || ""}</pre>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* BOTTOM: JSON */}
-              <div style={boxStyle}>
-                <div style={titleStyle}>Raw JSON</div>
-                <div style={scrollWrapStyle}>
-                  <pre style={preStyle}>{JSON.stringify(rawJson || {}, null, 2)}</pre>
+              {(expandedPane === null || expandedPane === "json") && (
+                <div style={boxStyle}>
+                  <div style={titleStyle}>
+                    <div style={panelTitleLeftStyle}>Raw JSON</div>
+                    <div style={panelTitleRightStyle}>
+                      <button
+                        type="button"
+                        style={smallIconBtnStyle}
+                        onClick={() => toggleExpand("json")}
+                        aria-label={expandedPane === "json" ? "Collapse Raw JSON" : "Expand Raw JSON"}
+                        title={expandedPane === "json" ? "Collapse" : "Expand"}
+                      >
+                        {expandedPane === "json" ? "⤡" : "⤢"}
+                      </button>
+                    </div>
+                  </div>
+                  <div style={scrollWrapStyle}>
+                    <pre style={preStyle}>{JSON.stringify(rawJson || {}, null, 2)}</pre>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
@@ -277,10 +451,7 @@ export default function OcrPlayground() {
   return (
     <div className="wb2">
       {/* keep Output below Input (no CSS change) */}
-      <div
-        className="wb2Grid"
-        style={{ display: "grid", gridTemplateColumns: "1fr", gap: "24px" }}
-      >
+      <div className="wb2Grid" style={{ display: "grid", gridTemplateColumns: "1fr", gap: "24px" }}>
         {/* INPUT PANEL (UNCHANGED) */}
         <section className="panel2">
           <div className="panel2Header">
@@ -368,7 +539,18 @@ export default function OcrPlayground() {
               onClick={executeAllModels}
               disabled={!file || executing || !models.length}
             >
-              {executing ? "Executing…" : executed ? "Executed" : "Execute"}
+              {executing ? (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span>Executing</span>
+                  <span className="wbDots" aria-hidden="true">
+                    ...
+                  </span>
+                </span>
+              ) : executed ? (
+                "Executed"
+              ) : (
+                "Execute"
+              )}
             </button>
           </div>
         </section>
@@ -419,16 +601,6 @@ export default function OcrPlayground() {
           </div>
 
           <div className="panel2Body">
-            <div className="outputTopLine">
-              {selectedError
-                ? "Selected model failed"
-                : selectedResult
-                ? ""
-                : executing
-                ? "Running all models…"
-                : "No output yet"}
-            </div>
-
             {/* ✅ Split bottom area into 2 columns: LEFT text, RIGHT metrics */}
             <div
               style={{
@@ -441,7 +613,10 @@ export default function OcrPlayground() {
             >
               {/* LEFT */}
               <div>
-                <ExtractedTextBox result={selectedResult} />
+                <ExtractedTextBox
+                  result={selectedResult}
+                  loading={selectedEntry?.status === "running" || (executing && !selectedResult)}
+                />
               </div>
 
               {/* RIGHT */}
@@ -492,6 +667,9 @@ export default function OcrPlayground() {
               isPdf={isPdf}
               extractedText={selectedResult?.text || (selectedError ? String(selectedError) : "")}
               rawJson={selectedResult?.raw ?? selectedResult ?? { error: selectedError || "No output" }}
+              models={models}
+              selectedModel={selectedModel}
+              onSelectModel={setSelectedModel}
             />
           </div>
         </section>
