@@ -88,12 +88,7 @@ function MetricsSkeleton() {
   );
 }
 
-/** ✅ Preview modal: LEFT input preview, RIGHT is 2 stacked halves (top text, bottom json)
- *  NEW:
- *   - model select inside header
- *   - fullscreen toggle
- *   - expand extracted/raw panels within modal
- */
+/** ✅ Preview modal */
 function PreviewModal({
   open,
   onClose,
@@ -107,8 +102,6 @@ function PreviewModal({
 }) {
   const [objectUrl, setObjectUrl] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
-
-  // null | "text" | "json"
   const [expandedPane, setExpandedPane] = useState(null);
 
   useEffect(() => {
@@ -121,7 +114,6 @@ function PreviewModal({
     };
   }, [open, file]);
 
-  // When closing, reset fullscreen/pane for clean reopen
   useEffect(() => {
     if (!open) {
       setIsFullscreen(false);
@@ -169,7 +161,6 @@ function PreviewModal({
       }
     : undefined;
 
-  // Right-side split (text + json)
   const outSplitStyle = {
     display: "grid",
     gridTemplateRows: expandedPane ? "1fr" : "1fr 1fr",
@@ -198,19 +189,6 @@ function PreviewModal({
     alignItems: "center",
     justifyContent: "space-between",
     gap: "10px",
-  };
-
-  const panelTitleLeftStyle = {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "8px",
-    minWidth: 0,
-  };
-
-  const panelTitleRightStyle = {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "8px",
   };
 
   const smallIconBtnStyle = {
@@ -252,27 +230,18 @@ function PreviewModal({
   };
 
   return (
-    <div
-      className="pvOverlay"
-      onMouseDown={() => {
-        onClose();
-      }}
-    >
+    <div className="pvOverlay" onMouseDown={() => onClose()}>
       <div className="pvModal" style={modalStyle} onMouseDown={(e) => e.stopPropagation()}>
         <div className="pvHeader">
           <div className="pvTitle">Input &amp; Output Preview</div>
 
-          {/* ✅ NEW: model select + fullscreen + close */}
           <div style={headerRightStyle}>
             <select
               className="modelSelect2"
               value={selectedModel}
               onChange={(e) => onSelectModel?.(e.target.value)}
               disabled={!models?.length}
-              style={{
-                height: "34px",
-                minWidth: "180px",
-              }}
+              style={{ height: "34px", minWidth: "180px" }}
               aria-label="Select model (preview)"
             >
               {(models || []).map((m) => (
@@ -299,7 +268,6 @@ function PreviewModal({
         </div>
 
         <div className="pvBody">
-          {/* LEFT */}
           <div className="pvPane">
             <div className="pvPaneTitle">Input File</div>
             <div className="pvPaneInner">
@@ -315,7 +283,6 @@ function PreviewModal({
             </div>
           </div>
 
-          {/* RIGHT */}
           <div className="pvPane">
             <div className="pvPaneTitle">Output</div>
 
@@ -323,20 +290,16 @@ function PreviewModal({
               {(expandedPane === null || expandedPane === "text") && (
                 <div style={boxStyle}>
                   <div style={titleStyle}>
-                    <div style={panelTitleLeftStyle}>Extracted Text</div>
-                    <div style={panelTitleRightStyle}>
-                      <button
-                        type="button"
-                        style={smallIconBtnStyle}
-                        onClick={() => toggleExpand("text")}
-                        aria-label={
-                          expandedPane === "text" ? "Collapse Extracted Text" : "Expand Extracted Text"
-                        }
-                        title={expandedPane === "text" ? "Collapse" : "Expand"}
-                      >
-                        {expandedPane === "text" ? "⤡" : "⤢"}
-                      </button>
-                    </div>
+                    <div>Extracted Text</div>
+                    <button
+                      type="button"
+                      style={smallIconBtnStyle}
+                      onClick={() => toggleExpand("text")}
+                      aria-label={expandedPane === "text" ? "Collapse Extracted Text" : "Expand Extracted Text"}
+                      title={expandedPane === "text" ? "Collapse" : "Expand"}
+                    >
+                      {expandedPane === "text" ? "⤡" : "⤢"}
+                    </button>
                   </div>
                   <div style={scrollWrapStyle}>
                     <pre style={preStyle}>{extractedText || ""}</pre>
@@ -347,18 +310,16 @@ function PreviewModal({
               {(expandedPane === null || expandedPane === "json") && (
                 <div style={boxStyle}>
                   <div style={titleStyle}>
-                    <div style={panelTitleLeftStyle}>Raw JSON</div>
-                    <div style={panelTitleRightStyle}>
-                      <button
-                        type="button"
-                        style={smallIconBtnStyle}
-                        onClick={() => toggleExpand("json")}
-                        aria-label={expandedPane === "json" ? "Collapse Raw JSON" : "Expand Raw JSON"}
-                        title={expandedPane === "json" ? "Collapse" : "Expand"}
-                      >
-                        {expandedPane === "json" ? "⤡" : "⤢"}
-                      </button>
-                    </div>
+                    <div>Raw JSON</div>
+                    <button
+                      type="button"
+                      style={smallIconBtnStyle}
+                      onClick={() => toggleExpand("json")}
+                      aria-label={expandedPane === "json" ? "Collapse Raw JSON" : "Expand Raw JSON"}
+                      title={expandedPane === "json" ? "Collapse" : "Expand"}
+                    >
+                      {expandedPane === "json" ? "⤡" : "⤢"}
+                    </button>
                   </div>
                   <div style={scrollWrapStyle}>
                     <pre style={preStyle}>{JSON.stringify(rawJson || {}, null, 2)}</pre>
@@ -373,6 +334,217 @@ function PreviewModal({
   );
 }
 
+/* ------------------------ ✅ More Metrics (FIXED + USEFUL) ------------------------ */
+
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+
+function computeMoreMetrics(result) {
+  const text = String(result?.text ?? "");
+  const chars = text.length;
+
+  const latencyMs =
+    (typeof result?.latency_ms === "number" && result.latency_ms) ||
+    (typeof result?.backend_latency_ms === "number" && result.backend_latency_ms) ||
+    null;
+
+  const seconds = latencyMs ? latencyMs / 1000 : null;
+  const charsPerSec = seconds && chars ? chars / seconds : null;
+
+  const billing = result?.billing || {};
+  const costUsd = typeof billing?.cost_usd === "number" ? billing.cost_usd : null;
+
+  // Prefer backend cost_per_1k if provided; else derive from costUsd + chars.
+  const backendCostPer1k =
+    typeof billing?.cost_per_1k_chars_usd === "number" ? billing.cost_per_1k_chars_usd : null;
+
+  const derivedCostPer1k =
+    backendCostPer1k != null
+      ? backendCostPer1k
+      : costUsd != null && chars > 0
+      ? costUsd * (1000 / chars)
+      : null;
+
+  const outputKb = Math.round((new Blob([text]).size / 1024) * 10) / 10;
+
+  // ✅ Better “noise”: weird characters (exclude common punctuation used in invoices/tables)
+  // We count only characters that are NOT:
+  // - letters/digits/space
+  // - common invoice punctuation: . , : ; - / ( ) [ ] { } # @ & % + = * ' " _ | \n \t
+  const weirdMatches = text.match(/[^a-zA-Z0-9\s\.\,\:\;\-\(\)\[\]\{\}\/\\#@&%+=\*'"_\|\t\n]/g) || [];
+  const weirdPct = chars ? Math.round((weirdMatches.length / chars) * 1000) / 10 : 0;
+
+  // Digit ratio %
+  const digitMatches = text.match(/[0-9]/g) || [];
+  const digitPct = chars ? Math.round((digitMatches.length / chars) * 1000) / 10 : 0;
+
+  // Duplicate line ratio %
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+  const totalLines = lines.length;
+  const uniqueLines = new Set(lines).size;
+  const dupLines = totalLines ? totalLines - uniqueLines : 0;
+  const dupLinePct = totalLines ? Math.round((dupLines / totalLines) * 1000) / 10 : 0;
+
+  // ✅ Efficiency score (0–10): speed + cost + cleanliness (weird + duplication)
+  // speed: saturate near 1200 chars/sec
+  const speedScore = charsPerSec ? clamp01(charsPerSec / 1200) : 0;
+
+  // cost: good if <= 0.005 per 1K; bad if >= 0.02
+  const costScore =
+    derivedCostPer1k != null ? clamp01((0.02 - derivedCostPer1k) / (0.02 - 0.005)) : 0.35;
+
+  // cleanliness: weird <= 1% and duplicate lines <= 5% are good
+  const weirdScore = clamp01((1.5 - weirdPct) / 1.5); // 0..1
+  const dupScore = clamp01((12 - dupLinePct) / 12); // 0..1
+  const cleanScore = 0.6 * weirdScore + 0.4 * dupScore;
+
+  const efficiencyScore =
+    Math.round((10 * (0.45 * speedScore + 0.35 * costScore + 0.20 * cleanScore)) * 10) / 10;
+
+  return {
+    costUsd,
+    costPer1k: derivedCostPer1k,
+    outputKb,
+    weirdPct,
+    digitPct,
+    dupLinePct,
+    efficiencyScore,
+  };
+}
+
+function MoreMetricsModal({ open, onClose, title, result }) {
+  if (!open) return null;
+
+  const m = computeMoreMetrics(result);
+
+  const Card = ({ label, value, sub }) => (
+    <div
+      style={{
+        background: "#fff7f5",
+        border: "1px solid rgba(16,24,40,0.10)",
+        borderRadius: 16,
+        padding: 14,
+        boxShadow: "0 8px 22px rgba(0,0,0,0.06)",
+      }}
+    >
+      <div style={{ fontSize: 12, letterSpacing: 0.6, opacity: 0.75, fontWeight: 800 }}>
+        {String(label || "").toUpperCase()}
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 900, marginTop: 6 }}>{value}</div>
+      {sub ? (
+        <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75, fontWeight: 700 }}>{sub}</div>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.35)",
+        display: "grid",
+        placeItems: "center",
+        zIndex: 80,
+        padding: 16,
+      }}
+    >
+      <div
+        style={{
+          width: "min(920px, 96vw)",
+          maxHeight: "88vh",
+          overflow: "auto",
+          background: "#fff",
+          borderRadius: 20,
+          border: "1px solid rgba(16,24,40,0.12)",
+          boxShadow: "0 16px 40px rgba(0,0,0,0.18)",
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div
+          style={{
+            padding: 16,
+            borderBottom: "1px solid rgba(16,24,40,0.08)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+          }}
+        >
+          <div style={{ fontWeight: 900 }}>{title}</div>
+          <button type="button" className="btnPrimary2" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <div style={{ padding: 16 }}>
+          <div style={{ marginBottom: 10, fontWeight: 900, opacity: 0.85 }}>Efficiency Score</div>
+
+          <Card
+            label="Efficiency"
+            value={typeof m.efficiencyScore === "number" ? `${m.efficiencyScore} / 10` : "—"}
+            sub=""
+          />
+
+          <div style={{ height: 14 }} />
+
+          <div style={{ marginBottom: 10, fontWeight: 900, opacity: 0.85 }}>Detailed Metrics</div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              gap: 12,
+            }}
+          >
+            <Card
+              label="Cost (USD)"
+              value={typeof m.costUsd === "number" ? `$${m.costUsd.toFixed(6)}` : "—"}
+              sub=""
+            />
+
+            <Card
+              label="Cost / 1K chars"
+              value={typeof m.costPer1k === "number" ? `$${m.costPer1k.toFixed(6)}` : "—"}
+              sub=""
+            />
+
+            <Card
+              label="Output Size"
+              value={`${m.outputKb} KB`}
+              sub="How heavy the extracted text is"
+            />
+
+            <Card
+              label="Weird Char %"
+              value={`${m.weirdPct}%`}
+              sub="Non-standard symbols"
+            />
+
+            <Card
+              label="Digit %"
+              value={`${m.digitPct}%`}
+              sub="Helpful for invoices/receipts"
+            />
+
+            <Card
+              label="Duplicate Line %"
+              value={`${m.dupLinePct}%`}
+              sub="Repeated lines / total lines"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------------- */
+
 export default function OcrPlayground() {
   const [models, setModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState("");
@@ -385,9 +557,10 @@ export default function OcrPlayground() {
 
   const [resultsByModel, setResultsByModel] = useState({});
 
-  // ✅ NEW (ADD-ONLY): compare modal state
   const [isCompareOpen, setIsCompareOpen] = useState(false);
-  const [compareModels, setCompareModels] = useState([]); // 2–3 model ids
+  const [compareModels, setCompareModels] = useState([]);
+
+  const [isMoreMetricsOpen, setIsMoreMetricsOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -411,7 +584,6 @@ export default function OcrPlayground() {
   const selectedResult = selectedEntry?.result || null;
   const selectedError = selectedEntry?.error || null;
 
-  // ✅ NEW: metrics lazy-loading (skeleton)
   const metricsLoading = executing || selectedEntry?.status === "running";
 
   const summaryMetrics = useMemo(() => {
@@ -446,7 +618,7 @@ export default function OcrPlayground() {
       lines: lines ? `${lines}` : "—",
       charsPerSec: charsPerSec != null ? `${charsPerSec}` : "—",
       costUsd: costUsd != null ? `$${costUsd.toFixed(6)}` : "—",
-      costPer1k: costPer1k != null ? `$${costPer1k.toFixed(6)}` : "—",
+      costPer1k: costPer1k != null ? `$${costPer1k.toFixed(6)}` : null,
     };
   }, [selectedResult]);
 
@@ -465,9 +637,9 @@ export default function OcrPlayground() {
     resetRunState();
     setIsPreviewOpen(false);
     setIsCompareOpen(false);
+    setIsMoreMetricsOpen(false);
   }
 
-  // ✅ NEW (ADD-ONLY): open compare modal with a safe default 2-model selection
   function openCompare() {
     const allIds = (models || []).map((m) => m?.id).filter(Boolean);
 
@@ -540,7 +712,7 @@ export default function OcrPlayground() {
   return (
     <div className="wb2">
       <div className="wb2Grid" style={{ display: "grid", gridTemplateColumns: "1fr", gap: "24px" }}>
-        {/* INPUT PANEL (UNCHANGED) */}
+        {/* INPUT PANEL */}
         <section className="panel2">
           <div className="panel2Header">
             <div className="panel2Title">Input Panel</div>
@@ -712,7 +884,29 @@ export default function OcrPlayground() {
 
               {/* RIGHT */}
               <div>
-                <div className="metricsTitle2">Key Metrics</div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    marginBottom: 10,
+                  }}
+                >
+                  <div className="metricsTitle2" style={{ margin: 0 }}>
+                    Key Metrics
+                  </div>
+
+                  <button
+                    className="btnGhost2"
+                    type="button"
+                    disabled={!selectedResult}
+                    onClick={() => setIsMoreMetricsOpen(true)}
+                    title={!selectedResult ? "Run OCR to view more metrics" : "View more metrics"}
+                  >
+                    More metrics
+                  </button>
+                </div>
 
                 <div className="metricsGrid2">
                   <div className="metricBox2">
@@ -752,12 +946,16 @@ export default function OcrPlayground() {
 
                   <div className="metricBox2">
                     <div className="metricLabel2">Cost (USD)</div>
+
                     <div className="metricValue2">
                       {metricsLoading ? <MetricsSkeleton /> : summaryMetrics?.costUsd || "—"}
                     </div>
-                    <div className="metricSub2">
-                      Cost / 1K chars: {metricsLoading ? "—" : summaryMetrics?.costPer1k || "—"}
-                    </div>
+
+                    {!metricsLoading &&
+                    summaryMetrics?.costPer1k &&
+                    summaryMetrics.costPer1k !== "—" && (
+                    <div className="metricSub2">Cost / 1K chars: {summaryMetrics.costPer1k}</div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -784,6 +982,13 @@ export default function OcrPlayground() {
               minSelect={2}
               maxSelect={3}
               fileName={file?.name || "output"}
+            />
+
+            <MoreMetricsModal
+              open={isMoreMetricsOpen}
+              onClose={() => setIsMoreMetricsOpen(false)}
+              title={`More Metrics — ${selectedModel || "model"}`}
+              result={selectedResult}
             />
           </div>
         </section>
