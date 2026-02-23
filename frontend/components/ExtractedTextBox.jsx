@@ -1,6 +1,10 @@
 import React, { useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
-export default function ExtractedTextBox({ result, loading = false }) {
+export default function ExtractedTextBox({ result, loading = false, variant = "default" }) {
+  const isCompare = variant === "compare";
+
   const fullText = useMemo(() => {
     if (!result) return "";
     if (typeof result.text === "string") return result.text;
@@ -42,6 +46,23 @@ export default function ExtractedTextBox({ result, loading = false }) {
     URL.revokeObjectURL(url);
   };
 
+  // Heuristic: decide if the text is "Markdown-ish"
+  const isMarkdownLike = useMemo(() => {
+    const t = fullText || "";
+    if (!t) return false;
+
+    const hasTable =
+      /\n\|.+\|\n\|[ \t:-]+\|/.test(t) ||
+      (t.includes("\n|") && t.includes("|---"));
+
+    const hasHeading = /(^|\n)#{1,6}\s+/.test(t);
+    const hasFence = t.includes("```");
+    const hasList = /(^|\n)(-|\*|\d+\.)\s+/.test(t);
+    const hasLink = /\[[^\]]+\]\([^)]+\)/.test(t);
+
+    return hasTable || hasHeading || hasFence || hasList || hasLink;
+  }, [fullText]);
+
   // ✅ Premium lazy loading — shimmer + scanner sweep + soft cursor
   const Loader = () => {
     const line = (w, d = 0) => (
@@ -58,7 +79,6 @@ export default function ExtractedTextBox({ result, loading = false }) {
           marginBottom: 10,
         }}
       >
-        {/* shimmer sweep */}
         <div
           style={{
             position: "absolute",
@@ -70,7 +90,6 @@ export default function ExtractedTextBox({ result, loading = false }) {
             animationDelay: `${d}s`,
           }}
         />
-        {/* scanner glow */}
         <div
           style={{
             position: "absolute",
@@ -113,7 +132,7 @@ export default function ExtractedTextBox({ result, loading = false }) {
         {line("76%", 0.16)}
         {line("90%", 0.24)}
         {line("72%", 0.32)}
-        {line("84%", 0.40)}
+        {line("84%", 0.4)}
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 2 }}>
           <div style={{ flex: 1 }}>{line("60%", 0.48)}</div>
@@ -138,6 +157,13 @@ export default function ExtractedTextBox({ result, loading = false }) {
   };
 
   const showEmpty = !loading && !fullText;
+
+  // ✅ Key change:
+  // default view keeps maxHeight + inner scroll
+  // compare view disables inner scroll so ONLY card scrolls
+  const bodyWrapStyle = isCompare
+    ? { padding: "14px 16px", overflowX: "auto" }
+    : { padding: "14px 16px", maxHeight: 320, overflow: "auto", overflowX: "auto" };
 
   return (
     <div className="extracted-text-box">
@@ -185,27 +211,123 @@ export default function ExtractedTextBox({ result, loading = false }) {
             No text available yet. Run benchmark and select a model.
           </div>
         ) : (
-          <div
-            style={{
-              padding: "14px 16px",
-              maxHeight: 320,
-              overflow: "auto",
-              overflowX: "auto",
-            }}
-          >
-            <div
-              style={{
-                whiteSpace: "pre",
-                wordBreak: "normal",
-                fontSize: 13,
-                lineHeight: 1.6,
-                color: "#111",
-                fontFamily:
-                  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-              }}
-            >
-              {fullText}
-            </div>
+          <div style={bodyWrapStyle}>
+            {isMarkdownLike ? (
+              <div
+                style={{
+                  color: "#111",
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  fontFamily:
+                    'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
+                }}
+              >
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    table: ({ children, ...props }) => (
+                      <table
+                        {...props}
+                        style={{
+                          width: "100%",
+                          borderCollapse: "collapse",
+                          marginTop: 10,
+                          marginBottom: 10,
+                          borderRadius: 12,
+                          overflow: "hidden",
+                        }}
+                      >
+                        {children}
+                      </table>
+                    ),
+                    th: ({ children, ...props }) => (
+                      <th
+                        {...props}
+                        style={{
+                          textAlign: "left",
+                          padding: "10px 10px",
+                          border: "1px solid rgba(17,17,17,0.10)",
+                          background: "rgba(240,87,66,0.08)",
+                          fontWeight: 700,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {children}
+                      </th>
+                    ),
+                    td: ({ children, ...props }) => (
+                      <td
+                        {...props}
+                        style={{
+                          padding: "10px 10px",
+                          border: "1px solid rgba(17,17,17,0.10)",
+                          verticalAlign: "top",
+                        }}
+                      >
+                        {children}
+                      </td>
+                    ),
+                    code: ({ inline, children, ...props }) =>
+                      inline ? (
+                        <code
+                          {...props}
+                          style={{
+                            fontFamily:
+                              'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                            background: "rgba(240,87,66,0.08)",
+                            padding: "2px 6px",
+                            borderRadius: 8,
+                          }}
+                        >
+                          {children}
+                        </code>
+                      ) : (
+                        <pre
+                          style={{
+                            overflowX: "auto",
+                            padding: "12px 12px",
+                            borderRadius: 12,
+                            background: "rgba(17,17,17,0.04)",
+                          }}
+                        >
+                          <code {...props}>{children}</code>
+                        </pre>
+                      ),
+                    h1: ({ children, ...props }) => (
+                      <div {...props} style={{ fontSize: 18, fontWeight: 800, margin: "6px 0 10px" }}>
+                        {children}
+                      </div>
+                    ),
+                    h2: ({ children, ...props }) => (
+                      <div {...props} style={{ fontSize: 16, fontWeight: 800, margin: "6px 0 10px" }}>
+                        {children}
+                      </div>
+                    ),
+                    h3: ({ children, ...props }) => (
+                      <div {...props} style={{ fontSize: 14, fontWeight: 800, margin: "6px 0 8px" }}>
+                        {children}
+                      </div>
+                    ),
+                  }}
+                >
+                  {fullText}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              <div
+                style={{
+                  whiteSpace: "pre",
+                  wordBreak: "normal",
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  color: "#111",
+                  fontFamily:
+                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                }}
+              >
+                {fullText}
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -1,5 +1,5 @@
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List, Tuple
 
 import fitz  # PyMuPDF
 from PIL import Image
@@ -9,6 +9,10 @@ import easyocr
 import numpy as np
 
 from .base import OCRAdapter
+from .postprocess_markdown import normalize_to_markdown
+
+
+Token = Tuple[str, float, float, float, float]  # (text, x1, y1, x2, y2)
 
 
 def _pdf_first_page_to_png_bytes(pdf_bytes: bytes, zoom: float = 2.0) -> bytes:
@@ -45,7 +49,9 @@ class EasyOCRAdapter(OCRAdapter):
                     break
 
         if image_bytes is None:
-            raise RuntimeError(f"EasyOCRAdapter.run() did not receive bytes. keys={list(kwargs.keys())}")
+            raise RuntimeError(
+                f"EasyOCRAdapter.run() did not receive bytes. keys={list(kwargs.keys())}"
+            )
 
         mt = (mime_type or "").strip().lower()
 
@@ -62,14 +68,35 @@ class EasyOCRAdapter(OCRAdapter):
 
         results = self.reader.readtext(img)
 
-        # build a simple unified output
+        # build unified output + tokens for table reconstruction
         lines = []
-        text_chunks = []
+        text_chunks: List[str] = []
+        tokens: List[Token] = []
+
         for (bbox, txt, conf) in results:
+            txt = str(txt).strip()
+            if not txt:
+                continue
+
             text_chunks.append(txt)
             lines.append({"text": txt, "score": float(conf), "bbox": bbox})
 
-        extracted_text = "\n".join(text_chunks)
+            # bbox is 4 points: [[x,y],[x,y],[x,y],[x,y]]
+            try:
+                xs = [p[0] for p in bbox]
+                ys = [p[1] for p in bbox]
+                x1, x2 = float(min(xs)), float(max(xs))
+                y1, y2 = float(min(ys)), float(max(ys))
+                tokens.append((txt, x1, y1, x2, y2))
+            except Exception:
+                # if bbox parsing fails, still keep text
+                pass
+
+        extracted_plain = "\n".join(text_chunks).strip()
+
+        # ✅ Convert to markdown-like (table when possible) so UI renders like Mistral
+        extracted_text = normalize_to_markdown(extracted_plain, tokens=tokens)
+
         latency_ms = (time.time() - t0) * 1000.0
 
         return {
@@ -79,6 +106,6 @@ class EasyOCRAdapter(OCRAdapter):
             "backend_latency_ms": latency_ms,
             "latency_ms": latency_ms,
             "raw": results,          # keep original easyocr output
-            "text": extracted_text,  # extracted text shown in UI
+            "text": extracted_text,  # ✅ markdown-friendly text shown in UI
             "lines": lines,          # enables “lines” metric in frontend
         }

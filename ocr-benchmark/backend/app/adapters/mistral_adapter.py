@@ -5,6 +5,7 @@ import requests
 from typing import Any, Dict, Optional, List
 
 from .base import OCRAdapter
+from .postprocess_markdown import normalize_to_markdown
 
 
 def _clean_endpoint(raw: str) -> str:
@@ -19,15 +20,15 @@ def _clean_endpoint(raw: str) -> str:
 def _text_to_lines(text: str) -> List[Dict[str, Any]]:
     """
     Convert extracted text into standardized lines array.
-    Keeps line breaks; filters empty lines.
+    IMPORTANT: keep leading spaces (don't strip) to avoid breaking table-like alignment.
     """
     if not text:
         return []
-    t = str(text).replace("\r", "").strip()
-    if not t:
+    t = str(text).replace("\r", "").strip("\n")
+    if not t.strip():
         return []
-    parts = [ln.strip() for ln in t.split("\n")]
-    parts = [ln for ln in parts if ln]
+    parts = [ln.rstrip() for ln in t.split("\n")]
+    parts = [ln for ln in parts if ln.strip()]  # keep non-empty (but don't destroy indentation)
     return [{"text": ln, "score": None, "box": None} for ln in parts]
 
 
@@ -129,6 +130,9 @@ class MistralOCRAdapter(OCRAdapter):
                         extracted_text = v.strip()
                         break
 
+        # ✅ keep output consistent across models (rarely changes Mistral, but safe)
+        extracted_text = normalize_to_markdown(extracted_text)
+
         lines = _text_to_lines(extracted_text)
 
         return {
@@ -138,7 +142,7 @@ class MistralOCRAdapter(OCRAdapter):
             "backend_latency_ms": latency_ms,
             "latency_ms": latency_ms,
             "text": extracted_text,
-            "lines": lines,                 # ✅ now correct for frontend
+            "lines": lines,                 # ✅ frontend-friendly
             "line_count": len(lines),
             "raw": data,
         }

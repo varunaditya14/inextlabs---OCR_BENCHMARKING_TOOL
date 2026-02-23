@@ -1,6 +1,8 @@
+// components/OcrPlayground.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { fetchModels, runBenchmark } from "../src/api";
 import ExtractedTextBox from "./ExtractedTextBox";
+import CompareModal from "./CompareModal";
 
 function wordCount(text) {
   if (!text) return 0;
@@ -17,6 +19,73 @@ function downloadJson(filename, data) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+/** ✅ Metrics shimmer (lazy loading) */
+function MetricsSkeleton() {
+  const line = (w, h = 12, d = 0) => (
+    <div
+      style={{
+        width: w,
+        height: h,
+        borderRadius: 999,
+        position: "relative",
+        overflow: "hidden",
+        background: "rgba(240,87,66,0.10)",
+        border: "1px solid rgba(240,87,66,0.10)",
+        boxShadow: "0 1px 0 rgba(16,24,40,0.03) inset",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background:
+            "linear-gradient(90deg, rgba(240,87,66,0.04), rgba(240,87,66,0.22), rgba(240,87,66,0.04))",
+          backgroundSize: "220% 100%",
+          animation: "wbShimmer 1.15s ease-in-out infinite",
+          animationDelay: `${d}s`,
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          top: -10,
+          bottom: -10,
+          width: 46,
+          background:
+            "linear-gradient(90deg, rgba(240,87,66,0), rgba(240,87,66,0.25), rgba(240,87,66,0))",
+          animation: "wbScan 2.2s ease-in-out infinite",
+          animationDelay: `${d * 0.6}s`,
+          opacity: 0.9,
+        }}
+      />
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "2px 0" }}>
+      <style>
+        {`
+          @keyframes wbShimmer {
+            0% { background-position: 210% 0; opacity: 0.75; }
+            50% { opacity: 1; }
+            100% { background-position: -210% 0; opacity: 0.75; }
+          }
+          @keyframes wbScan {
+            0% { transform: translateX(-60px); opacity: 0.2; }
+            45% { opacity: 0.85; }
+            100% { transform: translateX(520px); opacity: 0.2; }
+          }
+        `}
+      </style>
+
+      <div style={{ display: "grid", gap: 8 }}>
+        {line("42%", 10, 0)}
+        {line("68%", 18, 0.08)}
+      </div>
+    </div>
+  );
 }
 
 /** ✅ Preview modal: LEFT input preview, RIGHT is 2 stacked halves (top text, bottom json)
@@ -189,11 +258,7 @@ function PreviewModal({
         onClose();
       }}
     >
-      <div
-        className="pvModal"
-        style={modalStyle}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
+      <div className="pvModal" style={modalStyle} onMouseDown={(e) => e.stopPropagation()}>
         <div className="pvHeader">
           <div className="pvTitle">Input &amp; Output Preview</div>
 
@@ -255,7 +320,6 @@ function PreviewModal({
             <div className="pvPaneTitle">Output</div>
 
             <div style={outSplitStyle}>
-              {/* TOP: Extracted */}
               {(expandedPane === null || expandedPane === "text") && (
                 <div style={boxStyle}>
                   <div style={titleStyle}>
@@ -265,7 +329,9 @@ function PreviewModal({
                         type="button"
                         style={smallIconBtnStyle}
                         onClick={() => toggleExpand("text")}
-                        aria-label={expandedPane === "text" ? "Collapse Extracted Text" : "Expand Extracted Text"}
+                        aria-label={
+                          expandedPane === "text" ? "Collapse Extracted Text" : "Expand Extracted Text"
+                        }
                         title={expandedPane === "text" ? "Collapse" : "Expand"}
                       >
                         {expandedPane === "text" ? "⤡" : "⤢"}
@@ -278,7 +344,6 @@ function PreviewModal({
                 </div>
               )}
 
-              {/* BOTTOM: JSON */}
               {(expandedPane === null || expandedPane === "json") && (
                 <div style={boxStyle}>
                   <div style={titleStyle}>
@@ -320,6 +385,10 @@ export default function OcrPlayground() {
 
   const [resultsByModel, setResultsByModel] = useState({});
 
+  // ✅ NEW (ADD-ONLY): compare modal state
+  const [isCompareOpen, setIsCompareOpen] = useState(false);
+  const [compareModels, setCompareModels] = useState([]); // 2–3 model ids
+
   useEffect(() => {
     (async () => {
       const list = await fetchModels();
@@ -341,6 +410,9 @@ export default function OcrPlayground() {
   const selectedEntry = selectedModel ? resultsByModel[selectedModel] : null;
   const selectedResult = selectedEntry?.result || null;
   const selectedError = selectedEntry?.error || null;
+
+  // ✅ NEW: metrics lazy-loading (skeleton)
+  const metricsLoading = executing || selectedEntry?.status === "running";
 
   const summaryMetrics = useMemo(() => {
     if (!selectedResult) return null;
@@ -392,6 +464,23 @@ export default function OcrPlayground() {
     setFile(null);
     resetRunState();
     setIsPreviewOpen(false);
+    setIsCompareOpen(false);
+  }
+
+  // ✅ NEW (ADD-ONLY): open compare modal with a safe default 2-model selection
+  function openCompare() {
+    const allIds = (models || []).map((m) => m?.id).filter(Boolean);
+
+    const base = [];
+    if (selectedModel) base.push(selectedModel);
+
+    for (const id of allIds) {
+      if (base.length >= 2) break;
+      if (!base.includes(id)) base.push(id);
+    }
+
+    setCompareModels(base.slice(0, 3));
+    setIsCompareOpen(true);
   }
 
   async function executeAllModels() {
@@ -450,7 +539,6 @@ export default function OcrPlayground() {
 
   return (
     <div className="wb2">
-      {/* keep Output below Input (no CSS change) */}
       <div className="wb2Grid" style={{ display: "grid", gridTemplateColumns: "1fr", gap: "24px" }}>
         {/* INPUT PANEL (UNCHANGED) */}
         <section className="panel2">
@@ -574,6 +662,10 @@ export default function OcrPlayground() {
                 ))}
               </select>
 
+              <button className="btnGhost2" type="button" disabled={!file} onClick={openCompare}>
+                Compare
+              </button>
+
               <button
                 className="btnGhost2"
                 type="button"
@@ -601,7 +693,6 @@ export default function OcrPlayground() {
           </div>
 
           <div className="panel2Body">
-            {/* ✅ Split bottom area into 2 columns: LEFT text, RIGHT metrics */}
             <div
               style={{
                 display: "grid",
@@ -626,34 +717,46 @@ export default function OcrPlayground() {
                 <div className="metricsGrid2">
                   <div className="metricBox2">
                     <div className="metricLabel2">Latency</div>
-                    <div className="metricValue2">{summaryMetrics?.latencyMs || "—"}</div>
+                    <div className="metricValue2">
+                      {metricsLoading ? <MetricsSkeleton /> : summaryMetrics?.latencyMs || "—"}
+                    </div>
                   </div>
 
                   <div className="metricBox2">
                     <div className="metricLabel2">Chars Processed</div>
-                    <div className="metricValue2">{summaryMetrics?.chars || "—"}</div>
+                    <div className="metricValue2">
+                      {metricsLoading ? <MetricsSkeleton /> : summaryMetrics?.chars || "—"}
+                    </div>
                   </div>
 
                   <div className="metricBox2">
                     <div className="metricLabel2">Words</div>
-                    <div className="metricValue2">{summaryMetrics?.words || "—"}</div>
+                    <div className="metricValue2">
+                      {metricsLoading ? <MetricsSkeleton /> : summaryMetrics?.words || "—"}
+                    </div>
                   </div>
 
                   <div className="metricBox2">
                     <div className="metricLabel2">Lines</div>
-                    <div className="metricValue2">{summaryMetrics?.lines || "—"}</div>
+                    <div className="metricValue2">
+                      {metricsLoading ? <MetricsSkeleton /> : summaryMetrics?.lines || "—"}
+                    </div>
                   </div>
 
                   <div className="metricBox2">
                     <div className="metricLabel2">Chars / Sec</div>
-                    <div className="metricValue2">{summaryMetrics?.charsPerSec || "—"}</div>
+                    <div className="metricValue2">
+                      {metricsLoading ? <MetricsSkeleton /> : summaryMetrics?.charsPerSec || "—"}
+                    </div>
                   </div>
 
                   <div className="metricBox2">
                     <div className="metricLabel2">Cost (USD)</div>
-                    <div className="metricValue2">{summaryMetrics?.costUsd || "—"}</div>
+                    <div className="metricValue2">
+                      {metricsLoading ? <MetricsSkeleton /> : summaryMetrics?.costUsd || "—"}
+                    </div>
                     <div className="metricSub2">
-                      Cost / 1K chars: {summaryMetrics?.costPer1k || "—"}
+                      Cost / 1K chars: {metricsLoading ? "—" : summaryMetrics?.costPer1k || "—"}
                     </div>
                   </div>
                 </div>
@@ -670,6 +773,17 @@ export default function OcrPlayground() {
               models={models}
               selectedModel={selectedModel}
               onSelectModel={setSelectedModel}
+            />
+
+            <CompareModal
+              open={isCompareOpen}
+              onClose={() => setIsCompareOpen(false)}
+              models={models}
+              resultsByModel={resultsByModel}
+              initialSelected={compareModels}
+              minSelect={2}
+              maxSelect={3}
+              fileName={file?.name || "output"}
             />
           </div>
         </section>

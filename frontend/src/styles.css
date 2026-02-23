@@ -789,3 +789,756 @@ input {
   100% { clip-path: inset(0 100% 0 0); }
 }
 
+/* ============================
+   Compare Modal (ADD-ONLY)
+   Coral theme: #f05742
+============================ */
+
+.compareOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 10, 0.45);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+}
+
+.compareModal {
+  width: min(1200px, 96vw);
+  height: min(740px, 92vh);
+  background: #ffffff;
+  border-radius: 18px;
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(240, 87, 66, 0.15);
+}
+
+.compareModal.isFullscreen {
+  width: 98vw;
+  height: 96vh;
+}
+
+.compareHeader {
+  padding: 16px 18px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  background: linear-gradient(180deg, rgba(240,87,66,0.06), rgba(255,255,255,0));
+}
+
+.compareTitleWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.compareTitle {
+  font-weight: 700;
+  font-size: 16px;
+  color: #1f2937;
+}
+
+.compareSubtitle {
+  font-size: 12px;
+  color: rgba(31, 41, 55, 0.65);
+}
+
+.compareControls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Multi-select */
+.compareMultiSelect {
+  position: relative;
+  min-width: 260px;
+  max-width: 360px;
+}
+
+.compareSelectButton {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.10);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+}
+
+.compareSelectLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(31,41,55,0.75);
+}
+
+.compareSelectCount {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f05742;
+}
+
+.compareChevron {
+  font-size: 12px;
+  color: rgba(31,41,55,0.55);
+}
+
+.compareChipsRow {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.compareChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(240,87,66,0.10);
+  border: 1px solid rgba(240,87,66,0.20);
+  color: #b63b2e;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.compareChipX {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  color: rgba(182, 59, 46, 0.75);
+}
+
+.compareChipsHint {
+  font-size: 12px;
+  color: rgba(31,41,55,0.55);
+  padding: 6px 0;
+}
+
+/* Picker panel */
+.comparePicker {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 100%;
+  background: #ffffff;
+  border-radius: 14px;
+  border: 1px solid rgba(0,0,0,0.10);
+  box-shadow: 0 25px 60px rgba(0,0,0,0.14);
+  overflow: hidden;
+  z-index: 10000;
+}
+
+.comparePickerItem {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  border: none;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  text-align: left;
+}
+
+.comparePickerItem:last-child {
+  border-bottom: none;
+}
+
+.comparePickerItem:hover {
+  background: rgba(240,87,66,0.06);
+}
+
+.comparePickerItem:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.comparePickerItem.active {
+  background: rgba(240,87,66,0.08);
+}
+
+.comparePickerDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 2px solid rgba(240,87,66,0.55);
+}
+
+.comparePickerText {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(31,41,55,0.85);
+}
+
+.comparePickerTick {
+  font-size: 12px;
+  font-weight: 800;
+  color: #f05742;
+}
+
+.comparePickerFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(0,0,0,0.02);
+}
+
+.comparePickerNote {
+  font-size: 12px;
+  color: rgba(31,41,55,0.60);
+}
+
+.comparePickerNote.warn {
+  color: #d97706;
+  font-weight: 700;
+}
+
+.comparePickerDone {
+  background: #f05742;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* Header buttons */
+.compareIconBtn,
+.compareCloseBtn {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,0.10);
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.compareCloseBtn {
+  border-color: rgba(240,87,66,0.22);
+}
+
+/* Body */
+.compareBody {
+  padding: 14px 14px 18px;
+  overflow: hidden;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.compareGrid {
+  flex: 1;
+  display: grid;
+  gap: 12px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.compareColCard {
+  background: rgba(240,87,66,0.03);
+  border: 1px solid rgba(240,87,66,0.12);
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.compareColHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px;
+  background: rgba(255,255,255,0.75);
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+
+.compareModelPill {
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(31,41,55,0.85);
+  background: rgba(240,87,66,0.10);
+  border: 1px solid rgba(240,87,66,0.18);
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.compareStatus {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.compareStatus.ok {
+  color: #059669;
+}
+
+.compareStatus.missing {
+  color: #dc2626;
+}
+
+.compareMiniMetrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+}
+
+.compareMiniMetric {
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.compareMiniMetric .k {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(31,41,55,0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.compareMiniMetric .v {
+  font-size: 14px;
+  font-weight: 900;
+  color: rgba(31,41,55,0.88);
+  margin-top: 4px;
+}
+
+.compareTextWrap {
+  padding: 0 12px 12px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.compareSyncedScroll {
+  flex: 1;
+  overflow: auto;
+  border-radius: 14px;
+}
+
+/* Empty state */
+.compareEmpty {
+  flex: 1;
+  background: #fff;
+  border: 1px dashed rgba(240,87,66,0.35);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.compareEmptyTitle {
+  font-weight: 900;
+  color: rgba(31,41,55,0.85);
+  margin-bottom: 4px;
+}
+
+.compareEmptySub {
+  font-size: 12px;
+  color: rgba(31,41,55,0.60);
+}
+
+/* Raw JSON */
+.compareRaw {
+  margin: 0 12px 14px;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.compareRaw summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-weight: 900;
+  color: rgba(31,41,55,0.80);
+  background: rgba(0,0,0,0.02);
+}
+
+.compareRawPre {
+  margin: 0;
+  padding: 12px;
+  font-size: 12px;
+  overflow: auto;
+  white-space: pre;
+  word-break: normal;
+}
+
+/* Bottom hint */
+.compareBottomHint {
+  text-align: center;
+  font-size: 12px;
+  color: rgba(31,41,55,0.60);
+}
+
+.ocrMarkdown {
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #1f2937;
+}
+
+.ocrMarkdown h1, .ocrMarkdown h2, .ocrMarkdown h3 {
+  margin: 10px 0 8px;
+  font-weight: 700;
+}
+
+.ocrMarkdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.ocrMarkdown th, .ocrMarkdown td {
+  border: 1px solid rgba(31,41,55,0.12);
+  padding: 10px 10px;
+  vertical-align: top;
+}
+
+.ocrMarkdown th {
+  background: rgba(240, 87, 66, 0.08);
+  font-weight: 700;
+}
+
+.ocrMarkdown tr:nth-child(even) td {
+  background: rgba(31,41,55,0.02);
+}
+
+.ocrPlain {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+/* ============================
+   Compare Modal Additions
+   (Dropdown bars + better horizontal scroll)
+============================ */
+
+/* Ensure ExtractedTextBox inside compare can scroll horizontally for tables */
+.compareExtractWrap {
+  overflow-x: auto;
+}
+
+/* If ExtractedTextBox uses <pre>, force non-wrapping in compare modal */
+.compareModal pre {
+  white-space: pre;
+  word-break: normal;
+}
+
+/* Collapsible dropdown bar */
+.compareDrop {
+  margin-top: 10px;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.compareDropHead {
+  width: 100%;
+  border: none;
+  background: rgba(0,0,0,0.02);
+  cursor: pointer;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+
+.compareDropArrow {
+  font-size: 12px;
+  color: rgba(31,41,55,0.70);
+  width: 18px;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.compareDropTitle {
+  font-weight: 900;
+  color: rgba(31,41,55,0.82);
+  font-size: 12px;
+}
+
+.compareDropBody {
+  border-top: 1px solid rgba(0,0,0,0.06);
+  background: #fff;
+}
+
+.compareDropActions {
+  padding: 10px 12px;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  background: rgba(240,87,66,0.04);
+}
+
+.compareActionBtn {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,0.12);
+  background: #fff;
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.compareActionBtnPrimary {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(240,87,66,0.22);
+  background: #f05742;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 900;
+  font-size: 12px;
+}
+
+.compareActionBtn:disabled,
+.compareActionBtnPrimary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.compareDropPre {
+  margin: 0;
+  padding: 12px;
+  font-size: 12px;
+  overflow: auto;
+  max-height: 260px;
+  background: #111827;
+  color: #e5e7eb;
+  border-radius: 0;
+  white-space: pre;
+  word-break: normal;
+}
+/* ============================
+   Compare Modal: single-scroll + bigger MD/JSON viewers
+============================ */
+
+/* Make each model card the ONLY vertical scroller */
+.compareColCard {
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Scroll happens here (ONE scrollbar per model column) */
+.compareTextWrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto; /* the only vertical scroll */
+  padding-bottom: 12px;
+}
+
+/* ✅ Remove ExtractedTextBox vertical scrollbar INSIDE compare
+   (but keep horizontal scrolling for tables) */
+.compareExtractWrap--noInnerScroll {
+  overflow-x: auto; /* keep table left-right */
+  overflow-y: visible; /* no inner vertical scroll */
+}
+
+/* Most ExtractedTextBox implementations have an inner scroll container.
+   Force it to NOT capture vertical scroll in compare modal. */
+.compareExtractWrap--noInnerScroll * {
+  scrollbar-width: auto;
+}
+
+.compareExtractWrap--noInnerScroll pre,
+.compareExtractWrap--noInnerScroll .textBody,
+.compareExtractWrap--noInnerScroll .textScroll,
+.compareExtractWrap--noInnerScroll .etbBody,
+.compareExtractWrap--noInnerScroll .etbScroll {
+  max-height: none !important;
+  height: auto !important;
+  overflow-y: visible !important;
+}
+
+/* If your ExtractedTextBox uses a wrapper with overflow:auto, this will neutralize it */
+.compareExtractWrap--noInnerScroll .extractedScroll,
+.compareExtractWrap--noInnerScroll .outputScroll,
+.compareExtractWrap--noInnerScroll .scrollArea {
+  overflow-y: visible !important;
+  max-height: none !important;
+  height: auto !important;
+}
+
+/* ✅ Keep structured text non-wrapping + allow horizontal scroll */
+.compareExtractWrap--noInnerScroll pre {
+  white-space: pre !important;
+  word-break: normal !important;
+  overflow-x: auto !important;
+}
+
+/* ✅ Make Markdown/Raw JSON expanded viewer BIG */
+.compareDropPre {
+  max-height: 520px;  /* was 260px */
+  min-height: 320px;  /* ensures it looks large */
+  overflow: auto;
+}
+
+/* ============================
+   Compare Modal: single-scroll + bigger MD/JSON viewers
+============================ */
+
+/* Make each model card the ONLY vertical scroller */
+.compareColCard {
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Scroll happens here (ONE scrollbar per model column) */
+.compareTextWrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto; /* the only vertical scroll */
+  padding-bottom: 12px;
+}
+
+/* ✅ Remove ExtractedTextBox vertical scrollbar INSIDE compare
+   (but keep horizontal scrolling for tables) */
+.compareExtractWrap--noInnerScroll {
+  overflow-x: auto; /* keep table left-right */
+  overflow-y: visible; /* no inner vertical scroll */
+}
+
+/* Most ExtractedTextBox implementations have an inner scroll container.
+   Force it to NOT capture vertical scroll in compare modal. */
+.compareExtractWrap--noInnerScroll * {
+  scrollbar-width: auto;
+}
+
+.compareExtractWrap--noInnerScroll pre,
+.compareExtractWrap--noInnerScroll .textBody,
+.compareExtractWrap--noInnerScroll .textScroll,
+.compareExtractWrap--noInnerScroll .etbBody,
+.compareExtractWrap--noInnerScroll .etbScroll {
+  max-height: none !important;
+  height: auto !important;
+  overflow-y: visible !important;
+}
+
+/* If your ExtractedTextBox uses a wrapper with overflow:auto, this will neutralize it */
+.compareExtractWrap--noInnerScroll .extractedScroll,
+.compareExtractWrap--noInnerScroll .outputScroll,
+.compareExtractWrap--noInnerScroll .scrollArea {
+  overflow-y: visible !important;
+  max-height: none !important;
+  height: auto !important;
+}
+
+/* ✅ Keep structured text non-wrapping + allow horizontal scroll */
+.compareExtractWrap--noInnerScroll pre {
+  white-space: pre !important;
+  word-break: normal !important;
+  overflow-x: auto !important;
+}
+
+/* ✅ Make Markdown/Raw JSON expanded viewer BIG */
+.compareDropPre {
+  max-height: 520px;  /* was 260px */
+  min-height: 320px;  /* ensures it looks large */
+  overflow: auto;
+}
+/* Each model column scrolls independently */
+.compareColCard {
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.compareTextWrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto; /* ONE scrollbar for the whole model block */
+  padding-bottom: 12px;
+}
+
+/* Make Markdown/JSON viewers bigger */
+.compareDropPre {
+  max-height: 520px;
+  min-height: 320px;
+  overflow: auto;
+}
+/* ============================
+   PER-MODEL COLUMN SCROLL (FINAL)
+   One scrollbar per model column
+============================ */
+
+/* The modal body must give grid a real height */
+.compareModalBody {
+  height: calc(100% - 64px); /* header height adjust if needed */
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Grid must fill available modal body height */
+.compareGrid {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden; /* IMPORTANT: grid itself should NOT scroll */
+  display: grid;
+  gap: 14px;
+}
+
+/* Each model column card takes full grid height */
+.compareColCard {
+  min-height: 0;
+  height: 100%;
+  overflow: hidden; /* IMPORTANT */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header + metrics remain natural height */
+.compareColHeader,
+.compareMiniMetrics {
+  flex: 0 0 auto;
+}
+
+/* ✅ This is the ONLY vertical scroll for that model */
+.compareTextWrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto; /* ✅ PER MODEL SCROLL */
+  overflow-x: hidden;
+  padding-bottom: 10px;
+}
+
+/* Ensure markdown/json expand DOWN, not compress others weirdly */
+.compareTextWrap > * {
+  flex: 0 0 auto;
+}

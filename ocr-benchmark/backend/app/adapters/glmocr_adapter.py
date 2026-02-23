@@ -8,23 +8,36 @@ from PIL import Image
 from io import BytesIO
 
 from .base import OCRAdapter
+from .postprocess_markdown import normalize_to_markdown
 
 
 def _clean_ocr_text(s: str) -> str:
     s = (s or "").strip()
 
+    # keep inner content of fenced blocks, if any
     blocks = re.findall(r"```(?:\w+)?\s*([\s\S]*?)\s*```", s)
     if blocks:
         s = "\n".join([b.strip() for b in blocks if b.strip()]).strip()
 
     s = s.replace("```", "").strip()
 
-    lines = [ln.strip() for ln in s.splitlines()]
+    # drop tiny labels
+    lines = [ln.rstrip() for ln in s.splitlines()]
     junk = {"markdown", "json", "text"}
-    lines = [ln for ln in lines if ln and ln.lower() not in junk]
-    s = "\n".join(lines).strip()
+    lines2 = []
+    for ln in lines:
+        t = ln.strip()
+        if not t:
+            continue
+        if t.lower() in junk and len(t) <= 12:
+            continue
+        # remove common prefaces
+        low = t.lower().rstrip(":")
+        if low in {"here is the extracted text", "extracted text", "ocr output", "output", "result"}:
+            continue
+        lines2.append(ln.rstrip())
 
-    return s
+    return "\n".join(lines2).strip()
 
 
 def _text_to_lines(text: str) -> List[Dict[str, Any]]:
@@ -33,8 +46,8 @@ def _text_to_lines(text: str) -> List[Dict[str, Any]]:
     t = str(text).replace("\r", "").strip()
     if not t:
         return []
-    parts = [ln.strip() for ln in t.split("\n")]
-    parts = [ln for ln in parts if ln]
+    parts = [ln.rstrip() for ln in t.split("\n")]
+    parts = [ln for ln in parts if ln.strip()]
     return [{"text": ln, "score": None, "box": None} for ln in parts]
 
 
@@ -52,6 +65,7 @@ class GLMOCRAdapter(OCRAdapter):
         return "glm-ocr"
 
     def run(self, image_bytes: bytes, mime_type: str, filename: str = "", **kwargs) -> Dict[str, Any]:
+        # Your current flow expects GLM image only
         if not (mime_type.startswith("image/") or mime_type == "application/octet-stream"):
             raise ValueError(f"GLM-OCR expects an image. Got mime_type={mime_type}")
 
@@ -59,6 +73,7 @@ class GLMOCRAdapter(OCRAdapter):
 
         img = Image.open(BytesIO(image_bytes)).convert("RGB")
 
+        # shrink huge images (faster + less hallucination)
         max_side = 1280
         w, h = img.size
         scale = min(max_side / max(w, h), 1.0)
@@ -72,15 +87,25 @@ class GLMOCRAdapter(OCRAdapter):
 
         img_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
+        # ✅ Prompt engineered to produce structured Markdown like Mistral
         prompt = (
             "You are an OCR engine.\n"
-            "Task: Extract ALL visible text from the image.\n"
-            "Output rules:\n"
-            "1) Output ONLY the extracted text.\n"
-            "2) Do NOT use markdown.\n"
-            "3) Do NOT use code fences like ```.\n"
-            "4) Do NOT output JSON.\n"
-            "5) Preserve line breaks.\n"
+            "Extract ALL visible text from the image.\n\n"
+            "STRICT OUTPUT:\n"
+            "- Output ONLY extracted content.\n"
+            "- Use Markdown.\n"
+            "- Never use code fences (```).\n"
+            "- Never output JSON.\n"
+            "- Never add commentary.\n\n"
+            "TABLES (MANDATORY):\n"
+            "If you see a table (like invoice items), you MUST output a Markdown table using pipes.\n"
+            "Do NOT flatten it into plain text.\n\n"
+            "For an invoice items table, use this exact column order if present:\n"
+            "Sr | Description | HSN/SAC | Qty | Unit | Rate (₹) | Amount (₹)\n\n"
+            "Example format (follow exactly):\n"
+            "| Sr | Description | HSN/SAC | Qty | Unit | Rate (₹) | Amount (₹) |\n"
+            "|---:|-------------|--------:|----:|------|---------:|-----------:|\n"
+            "| 1 | ... | ... | ... | ... | ... | ... |\n"
         )
 
         payload = {
@@ -101,6 +126,9 @@ class GLMOCRAdapter(OCRAdapter):
         raw_text = data.get("response") or ""
         text = _clean_ocr_text(raw_text)
 
+        # ✅ normalize tags, remove junk, keep markdown-friendly output consistent
+        text = normalize_to_markdown(text)
+
         latency_ms = int((time.time() - t0) * 1000)
         lines = _text_to_lines(text)
 
@@ -110,8 +138,8 @@ class GLMOCRAdapter(OCRAdapter):
             "mime_type": mime_type,
             "backend_latency_ms": latency_ms,
             "latency_ms": latency_ms,
-            "text": text,
-            "lines": lines,          # ✅ now consistent
+            "text": text,          # ✅ markdown structured now
+            "lines": lines,        # ✅ now consistent
             "line_count": len(lines),
             "raw": data,
         }

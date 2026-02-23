@@ -1,5 +1,3 @@
-# ocr-benchmark/backend/app/adapters/trocr_adapter.py
-
 import io
 import os
 import time
@@ -7,6 +5,8 @@ import warnings
 from typing import Any, Dict, List
 
 from PIL import Image
+
+from .postprocess_markdown import normalize_to_markdown
 
 # Silence noisy libs
 warnings.filterwarnings("ignore")
@@ -63,6 +63,23 @@ class TrOCRAdapter:
         text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
         return (text or "").strip()
 
+    def _dedupe_lines(self, lines: List[str]) -> List[str]:
+        """
+        Overlap tiling often repeats lines. This removes consecutive duplicates
+        and near-empty noise.
+        """
+        out: List[str] = []
+        last = ""
+        for ln in lines:
+            t = " ".join((ln or "").split()).strip()
+            if not t:
+                continue
+            if t == last:
+                continue
+            out.append(ln.strip())
+            last = t
+        return out
+
     def run(self, image_bytes: bytes, filename: str = "", mime_type: str = "") -> Dict[str, Any]:
         t0 = time.time()
 
@@ -71,19 +88,24 @@ class TrOCRAdapter:
         # Tile full page → better doc OCR
         tiles = self._tile_image(img, rows=3, cols=2, overlap=40)
 
-        parts = []
+        parts: List[str] = []
         for tile in tiles:
             txt = self._ocr_one(tile)
             if txt:
                 parts.append(txt)
 
+        parts = self._dedupe_lines(parts)
+
         final_text = "\n".join(parts).strip()
+
+        # ✅ keep formatting consistent across models
+        final_text = normalize_to_markdown(final_text)
 
         latency_ms = (time.time() - t0) * 1000.0
         return {
             "model": "trocr",
             "text": final_text if final_text else "",
-            "lines": [{"text": t} for t in parts],  # fake "lines" so UI metrics work
+            "lines": [{"text": t, "score": None, "box": None} for t in (final_text.splitlines() if final_text else [])],
             "avg_conf": None,  # TrOCR doesn't give confidence easily
             "raw": {
                 "model_name": self.model_name,
