@@ -10,10 +10,8 @@ from typing import Any, Dict, List
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-
 from starlette.concurrency import run_in_threadpool
 
-# ✅ billing helper
 from app.billing import build_billing
 
 # ✅ Reduce noisy logs (optional)
@@ -68,7 +66,7 @@ HEAVY_LOCAL_MODELS = {"trocr"}  # heavy torch model
 API_SEM = asyncio.Semaphore(2)     # allow only 2 API models at a time (avoid 429)
 HEAVY_SEM = asyncio.Semaphore(1)   # avoid overloading TrOCR (GPU/CPU)
 
-# ✅ Reuse adapter instances (prevents re-init overhead if adapters cache models internally)
+# ✅ Reuse adapter instances
 _ADAPTER_INSTANCES: Dict[str, Any] = {}
 
 
@@ -79,24 +77,15 @@ def get_adapter_instance(model: str):
 
 
 def sanitize_for_json(obj: Any) -> Any:
-    """
-    Convert numpy types / bytes / weird objects into JSON-safe Python types.
-    Fixes: numpy.int32 not serializable etc.
-    """
-    # bytes -> base64 string
     if isinstance(obj, (bytes, bytearray)):
         return base64.b64encode(bytes(obj)).decode("utf-8")
 
-    # dict
     if isinstance(obj, dict):
         return {str(k): sanitize_for_json(v) for k, v in obj.items()}
 
-    # list/tuple/set
     if isinstance(obj, (list, tuple, set)):
         return [sanitize_for_json(x) for x in obj]
 
-    # numpy scalar
-    tname = type(obj).__name__
     mod = getattr(type(obj), "__module__", "")
     if str(mod).startswith("numpy") and hasattr(obj, "item"):
         try:
@@ -104,14 +93,12 @@ def sanitize_for_json(obj: Any) -> Any:
         except Exception:
             return str(obj)
 
-    # numpy array
     if str(mod).startswith("numpy") and hasattr(obj, "tolist"):
         try:
             return obj.tolist()
         except Exception:
             return str(obj)
 
-    # Path -> string
     if isinstance(obj, Path):
         return str(obj)
 
@@ -119,14 +106,10 @@ def sanitize_for_json(obj: Any) -> Any:
 
 
 def pdf_first_page_to_png_bytes(pdf_bytes: bytes, dpi: int = 200) -> bytes:
-    """
-    Convert the FIRST PAGE of a PDF to PNG bytes.
-    Uses PyMuPDF (fitz).
-    """
     try:
         import fitz  # PyMuPDF
     except Exception as e:
-        raise RuntimeError('PyMuPDF not installed. Install: python -m pip install pymupdf') from e
+        raise RuntimeError("PyMuPDF not installed. Install: python -m pip install pymupdf") from e
 
     if not pdf_bytes:
         raise RuntimeError("Empty PDF bytes")
@@ -138,10 +121,8 @@ def pdf_first_page_to_png_bytes(pdf_bytes: bytes, dpi: int = 200) -> bytes:
             raise RuntimeError("PDF has 0 pages")
 
         page = doc.load_page(0)
-
         zoom = float(dpi) / 72.0
         mat = fitz.Matrix(zoom, zoom)
-
         pix = page.get_pixmap(matrix=mat, alpha=False)
         return pix.tobytes("png")
     except Exception as e:
@@ -151,71 +132,47 @@ def pdf_first_page_to_png_bytes(pdf_bytes: bytes, dpi: int = 200) -> bytes:
             doc.close()
 
 
-# ✅ Frontend dropdown uses this
 @app.get("/models")
 def list_models() -> List[Dict[str, str]]:
-    out = []
-    for k in ADAPTERS.keys():
-        out.append({"id": k, "label": k})
-    return out
+    return [{"id": k, "label": k} for k in ADAPTERS.keys()]
 
 
-# =========================
-# ✅ NEW FAST ENDPOINT
-# =========================
 @app.post("/run-benchmark")
 async def run_benchmark(file: UploadFile = File(...)) -> Dict[str, Any]:
-    """
-    Runs ALL models in one request, concurrently (safe controlled concurrency),
-    and returns combined results for instant frontend switching.
-    """
     file_bytes = await file.read()
     mime_type = (file.content_type or "").lower()
     filename = file.filename or ""
 
     png_bytes = None
     if mime_type == "application/pdf":
-        # Convert once, reuse for image-only models
         png_bytes = pdf_first_page_to_png_bytes(file_bytes, dpi=200)
 
     async def run_one(model: str) -> Dict[str, Any]:
-        adapter = get_adapter_instance(model)
-
-        effective_bytes = file_bytes
-        effective_mime = mime_type
-        effective_filename = filename
-
-        if mime_type == "application/pdf" and model in IMG_ONLY_MODELS:
-            effective_bytes = png_bytes
-            effective_mime = "image/png"
-            effective_filename = (filename or "file.pdf") + " (page1).png"
-
         t0 = time.time()
 
         try:
-            # API models: controlled concurrency + async if available
-            if model in API_MODELS:
-                async with API_SEM:
-                    result = await adapter.run_async(
+            adapter = get_adapter_instance(model)
+
+            effective_bytes = file_bytes
+            effective_mime = mime_type
+            effective_filename = filename
+
+            if mime_type == "application/pdf" and model in IMG_ONLY_MODELS:
+                effective_bytes = png_bytes
+                effective_mime = "image/png"
+                effective_filename = (filename or "file.pdf") + " (page1).png"
+
+            # ✅ helper: run adapter safely (async if available, else sync in threadpool)
+            async def call_adapter():
+                # If adapter has run_async, prefer it
+                if hasattr(adapter, "run_async") and callable(getattr(adapter, "run_async")):
+                    return await adapter.run_async(
                         image_bytes=effective_bytes,
                         filename=effective_filename,
                         mime_type=effective_mime,
                     )
-
-            # Heavy local model: controlled concurrency + threadpool
-            elif model in HEAVY_LOCAL_MODELS:
-                async with HEAVY_SEM:
-                    result = await run_in_threadpool(
-                        lambda: adapter.run(
-                            image_bytes=effective_bytes,
-                            filename=effective_filename,
-                            mime_type=effective_mime,
-                        )
-                    )
-
-            # Normal local OCR: run in threadpool so multiple can run together
-            else:
-                result = await run_in_threadpool(
+                # Else fallback to sync run()
+                return await run_in_threadpool(
                     lambda: adapter.run(
                         image_bytes=effective_bytes,
                         filename=effective_filename,
@@ -223,13 +180,26 @@ async def run_benchmark(file: UploadFile = File(...)) -> Dict[str, Any]:
                     )
                 )
 
+            # API models: semaphore
+            if model in API_MODELS:
+                async with API_SEM:
+                    result = await call_adapter()
+
+            # Heavy local: semaphore
+            elif model in HEAVY_LOCAL_MODELS:
+                async with HEAVY_SEM:
+                    result = await call_adapter()
+
+            # Normal local
+            else:
+                result = await call_adapter()
+
         except Exception as e:
-            # return error but do NOT crash whole benchmark
             return sanitize_for_json(
                 {
                     "model": model,
-                    "filename": effective_filename,
-                    "mime_type": effective_mime,
+                    "filename": filename,
+                    "mime_type": mime_type,
                     "error": repr(e),
                     "backend_latency_ms": int((time.time() - t0) * 1000),
                 }
@@ -237,7 +207,6 @@ async def run_benchmark(file: UploadFile = File(...)) -> Dict[str, Any]:
 
         backend_latency_ms = int((time.time() - t0) * 1000)
 
-        # normalize fields
         if isinstance(result, dict):
             result.setdefault("backend_latency_ms", backend_latency_ms)
             result.setdefault("model", model)
@@ -252,7 +221,6 @@ async def run_benchmark(file: UploadFile = File(...)) -> Dict[str, Any]:
                 "raw": result,
             }
 
-        # attach billing
         result["billing"] = build_billing(
             model=model,
             payload=result,
@@ -262,11 +230,8 @@ async def run_benchmark(file: UploadFile = File(...)) -> Dict[str, Any]:
         return sanitize_for_json(result)
 
     models = list(ADAPTERS.keys())
-
-    # run all models concurrently
     results_list = await asyncio.gather(*(run_one(m) for m in models))
 
-    # return keyed results for frontend caching
     results = {}
     for r in results_list:
         k = r.get("model", "unknown")
@@ -275,9 +240,6 @@ async def run_benchmark(file: UploadFile = File(...)) -> Dict[str, Any]:
     return {"filename": filename, "mime_type": mime_type, "results": results}
 
 
-# =========================
-# ✅ EXISTING SINGLE-MODEL ENDPOINT (keep it)
-# =========================
 @app.post("/run-ocr")
 async def run_ocr(
     model: str = Form(...),
@@ -287,8 +249,7 @@ async def run_ocr(
     if model not in ADAPTERS:
         raise HTTPException(status_code=400, detail=f"Unknown model: {model}")
 
-    adapter_class = ADAPTERS[model]
-    adapter = adapter_class()
+    adapter = ADAPTERS[model]()
 
     file_bytes = await file.read()
     mime_type = (file.content_type or "").lower()

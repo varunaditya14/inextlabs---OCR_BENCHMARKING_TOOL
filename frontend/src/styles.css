@@ -39,7 +39,8 @@ body {
   margin: 0;
   color: var(--text);
   background: var(--bg);
-  font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Arial, "Noto Sans", "Liberation Sans", sans-serif;
 }
 
 /* =========================================
