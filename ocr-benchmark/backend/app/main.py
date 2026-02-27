@@ -1,5 +1,3 @@
-# ocr-benchmark/backend/app/main.py
-
 import time
 import base64
 import os
@@ -23,6 +21,11 @@ os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 BACKEND_ENV = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(dotenv_path=BACKEND_ENV)
 
+print("ENV PATH:", BACKEND_ENV)
+print("AZURE_OPENAI_API_KEY present?", bool(os.getenv("AZURE_OPENAI_API_KEY")))
+print("AZURE_OPENAI_ENDPOINT:", os.getenv("AZURE_OPENAI_ENDPOINT"))
+print("AZURE_OPENAI_DEPLOYMENT:", os.getenv("AZURE_OPENAI_DEPLOYMENT"))
+
 # ===== Adapters =====
 from app.adapters.easyocr_adapter import EasyOCRAdapter
 from app.adapters.paddleocr_adapter import PaddleOCRAdapter
@@ -31,7 +34,7 @@ from app.adapters.gemini3_adapter import Gemini3Adapter
 from app.adapters.gemini3pro_adapter import Gemini3ProAdapter
 from app.adapters.trocr_adapter import TrOCRAdapter
 from app.adapters.glmocr_adapter import GLMOCRAdapter
-
+from app.adapters.gpt52_adapter import GPT52Adapter
 
 app = FastAPI(title="OCR Benchmark Backend")
 
@@ -53,13 +56,26 @@ ADAPTERS = {
     "gemini3pro": Gemini3ProAdapter,
     "trocr": TrOCRAdapter,
     "glm-ocr": GLMOCRAdapter,
+    "gpt52": GPT52Adapter,
+}
+
+# ✅ Pretty labels for frontend dropdown
+MODEL_LABELS = {
+    "easyocr": "EasyOCR",
+    "paddleocr": "PaddleOCR",
+    "mistral": "Mistral OCR",
+    "gemini3": "Gemini 3",
+    "gemini3pro": "Gemini 3 Pro",
+    "trocr": "TrOCR",
+    "glm-ocr": "GLM OCR",
+    "gpt52": "GPT 5.2",
 }
 
 # Models that require image bytes (if PDF uploaded -> convert first page to PNG)
-IMG_ONLY_MODELS = {"easyocr", "paddleocr", "trocr", "gemini3", "gemini3pro", "glm-ocr"}
+IMG_ONLY_MODELS = {"easyocr", "paddleocr", "trocr", "gemini3", "gemini3pro", "glm-ocr", "gpt52"}
 
 # ✅ Model categories for safe concurrency controls
-API_MODELS = {"gemini3", "gemini3pro", "mistral", "glm-ocr"}  # network/rate-limited
+API_MODELS = {"gemini3", "gemini3pro", "mistral", "glm-ocr", "gpt52"}  # network/rate-limited
 HEAVY_LOCAL_MODELS = {"trocr"}  # heavy torch model
 
 # ✅ Semaphores (tune these)
@@ -134,7 +150,7 @@ def pdf_first_page_to_png_bytes(pdf_bytes: bytes, dpi: int = 200) -> bytes:
 
 @app.get("/models")
 def list_models() -> List[Dict[str, str]]:
-    return [{"id": k, "label": k} for k in ADAPTERS.keys()]
+    return [{"id": k, "label": MODEL_LABELS.get(k, k)} for k in ADAPTERS.keys()]
 
 
 @app.post("/run-benchmark")
@@ -162,16 +178,13 @@ async def run_benchmark(file: UploadFile = File(...)) -> Dict[str, Any]:
                 effective_mime = "image/png"
                 effective_filename = (filename or "file.pdf") + " (page1).png"
 
-            # ✅ helper: run adapter safely (async if available, else sync in threadpool)
             async def call_adapter():
-                # If adapter has run_async, prefer it
                 if hasattr(adapter, "run_async") and callable(getattr(adapter, "run_async")):
                     return await adapter.run_async(
                         image_bytes=effective_bytes,
                         filename=effective_filename,
                         mime_type=effective_mime,
                     )
-                # Else fallback to sync run()
                 return await run_in_threadpool(
                     lambda: adapter.run(
                         image_bytes=effective_bytes,
@@ -180,17 +193,12 @@ async def run_benchmark(file: UploadFile = File(...)) -> Dict[str, Any]:
                     )
                 )
 
-            # API models: semaphore
             if model in API_MODELS:
                 async with API_SEM:
                     result = await call_adapter()
-
-            # Heavy local: semaphore
             elif model in HEAVY_LOCAL_MODELS:
                 async with HEAVY_SEM:
                     result = await call_adapter()
-
-            # Normal local
             else:
                 result = await call_adapter()
 
@@ -232,11 +240,7 @@ async def run_benchmark(file: UploadFile = File(...)) -> Dict[str, Any]:
     models = list(ADAPTERS.keys())
     results_list = await asyncio.gather(*(run_one(m) for m in models))
 
-    results = {}
-    for r in results_list:
-        k = r.get("model", "unknown")
-        results[k] = r
-
+    results = {r.get("model", "unknown"): r for r in results_list}
     return {"filename": filename, "mime_type": mime_type, "results": results}
 
 
@@ -298,3 +302,4 @@ async def run_ocr(
     )
 
     return sanitize_for_json(result)
+
