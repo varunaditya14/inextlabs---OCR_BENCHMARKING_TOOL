@@ -12,12 +12,12 @@ from starlette.concurrency import run_in_threadpool
 
 from app.billing import build_billing
 
-# ✅ Reduce noisy logs (optional)
+# Reduce noisy logs
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
-# ✅ Load backend .env (located at ocr-benchmark/backend/.env)
+# Load backend .env
 BACKEND_ENV = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(dotenv_path=BACKEND_ENV)
 
@@ -27,6 +27,7 @@ print("AZURE_OPENAI_ENDPOINT:", os.getenv("AZURE_OPENAI_ENDPOINT"))
 print("AZURE_OPENAI_DEPLOYMENT:", os.getenv("AZURE_OPENAI_DEPLOYMENT"))
 print("MISTRALV2_API_KEY present?", bool(os.getenv("MISTRALV2_API_KEY")))
 print("MISTRALV2_ENDPOINT:", os.getenv("MISTRALV2_ENDPOINT"))
+print("GEMINI_API_KEY present?", bool(os.getenv("GEMINI_API_KEY")))
 
 # ===== Adapters =====
 from app.adapters.easyocr_adapter import EasyOCRAdapter
@@ -37,13 +38,14 @@ from app.adapters.gemini3pro_adapter import Gemini3ProAdapter
 from app.adapters.trocr_adapter import TrOCRAdapter
 from app.adapters.glmocr_adapter import GLMOCRAdapter
 from app.adapters.gpt52_adapter import GPT52Adapter
-
-# ✅ NEW: Mistral V2 adapter (filename MUST be mistralv2_adapter.py)
 from app.adapters.mistralv2_adapter import MistralV2Adapter
+from app.adapters.docling_adapter import DoclingAdapter
+from app.adapters.markitdown_adapter import MarkItDownAdapter
+from app.adapters.langextract_adapter import LangExtractAdapter
 
 app = FastAPI(title="OCR Benchmark Backend")
 
-# ✅ CORS (frontend calls backend)
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -52,7 +54,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ===== Labels for dropdown (backend ID can stay same) =====
 MODEL_LABELS = {
     "easyocr": "EasyOCR",
     "paddleocr": "PaddleOCR",
@@ -63,40 +64,66 @@ MODEL_LABELS = {
     "trocr": "TrOCR",
     "glm-ocr": "GLM OCR",
     "gpt52": "GPT 5.2",
+    "docling": "Docling",
+    "markitdown": "MarkItDown",
+    "langextract": "LangExtract",
 }
 
-# ===== Registry of available models =====
+
 ADAPTERS = {
     "easyocr": EasyOCRAdapter,
     "paddleocr": PaddleOCRAdapter,
     "mistral": MistralOCRAdapter,
-    "mistralv2": MistralV2Adapter,   # ✅ NEW
+    "mistralv2": MistralV2Adapter,
     "gemini3": Gemini3Adapter,
     "gemini3pro": Gemini3ProAdapter,
     "trocr": TrOCRAdapter,
     "glm-ocr": GLMOCRAdapter,
     "gpt52": GPT52Adapter,
+    "docling": DoclingAdapter,
+    "markitdown": MarkItDownAdapter,
+    "langextract": LangExtractAdapter,
 }
 
+
 # Models that require image bytes (if PDF uploaded -> convert first page to PNG)
-# NOTE: mistralv2 supports PDF base64, so DO NOT put it here.
-IMG_ONLY_MODELS = {"easyocr", "paddleocr", "trocr", "gemini3", "gemini3pro", "glm-ocr", "gpt52", "nanonets"}
+# Docling/MarkItDown can take PDF directly -> keep them out.
+IMG_ONLY_MODELS = {
+    "easyocr",
+    "paddleocr",
+    "trocr",
+    "gemini3",
+    "gemini3pro",
+    "glm-ocr",
+    "gpt52",
+}
 
-# ✅ Model categories for safe concurrency controls
-API_MODELS = {"gemini3", "gemini3pro", "mistral", "mistralv2", "glm-ocr", "gpt52"}  # network/rate-limited
-HEAVY_LOCAL_MODELS = {"trocr"}  # heavy torch model
+# Concurrency categories
+API_MODELS = {
+    "gemini3",
+    "gemini3pro",
+    "mistral",
+    "mistralv2",
+    "glm-ocr",
+    "gpt52",
+    "langextract",
+}
 
-# ✅ Semaphores (tune these)
-API_SEM = asyncio.Semaphore(2)     # allow only 2 API models at a time (avoid 429)
-HEAVY_SEM = asyncio.Semaphore(1)   # avoid overloading TrOCR (GPU/CPU)
+HEAVY_LOCAL_MODELS = {
+    "trocr",
+    "docling",
+    "markitdown",
+}
 
-# ✅ Reuse adapter instances
+API_SEM = asyncio.Semaphore(2)
+HEAVY_SEM = asyncio.Semaphore(1)
+
 _ADAPTER_INSTANCES: Dict[str, Any] = {}
 
 
 def get_adapter_instance(model: str):
     if model not in _ADAPTER_INSTANCES:
-        _ADAPTER_INSTANCES[model] = ADAPTERS[model]()  # create once
+        _ADAPTER_INSTANCES[model] = ADAPTERS[model]()
     return _ADAPTER_INSTANCES[model]
 
 
@@ -249,7 +276,7 @@ async def run_benchmark(file: UploadFile = File(...)) -> Dict[str, Any]:
     models = list(ADAPTERS.keys())
     results_list = await asyncio.gather(*(run_one(m) for m in models))
 
-    results = {}
+    results: Dict[str, Any] = {}
     for r in results_list:
         k = r.get("model", "unknown")
         results[k] = r
