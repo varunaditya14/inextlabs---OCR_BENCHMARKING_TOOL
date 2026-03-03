@@ -36,10 +36,10 @@ def _escape_md_cell(x: Any) -> str:
 
 def _render_markdown_table(headers: List[str], rows: List[List[Any]]) -> str:
     if not headers:
-        # If no headers, try infer from widest row length
         w = 0
-        for r in rows:
-            w = max(w, len(r) if isinstance(r, list) else 0)
+        for r in rows or []:
+            if isinstance(r, list):
+                w = max(w, len(r))
         headers = [f"col_{i+1}" for i in range(w)]
 
     hdr = "| " + " | ".join(_escape_md_cell(h) for h in headers) + " |"
@@ -61,17 +61,16 @@ def _json_to_pretty_text(structured: Dict[str, Any]) -> str:
     doc_type = meta.get("document_type")
     lang = meta.get("language")
     if doc_type or lang:
-        lines.append("DOCUMENT META")
+        lines.append("## Document Meta")
         if doc_type:
-            lines.append(f"- document_type: {doc_type}")
+            lines.append(f"- **document_type**: {doc_type}")
         if lang:
-            lines.append(f"- language: {lang}")
+            lines.append(f"- **language**: {lang}")
         lines.append("")
 
-    # Key values first (nice for invoice view)
     key_values = structured.get("key_values") or []
     if isinstance(key_values, list) and key_values:
-        lines.append("KEY FIELDS")
+        lines.append("## Key Fields")
         for kv in key_values:
             if not isinstance(kv, dict):
                 continue
@@ -79,27 +78,27 @@ def _json_to_pretty_text(structured: Dict[str, Any]) -> str:
             v = kv.get("value")
             if k is None and v is None:
                 continue
-            lines.append(f"- {k}: {v}")
+            lines.append(f"- **{k}**: {v}")
         lines.append("")
 
-    # Sections
     sections = structured.get("sections") or []
     if isinstance(sections, list) and sections:
+        lines.append("## Sections")
+        lines.append("")
         for sec in sections:
             if not isinstance(sec, dict):
                 continue
             title = (sec.get("title") or "").strip()
             content = (sec.get("content") or "").strip()
             if title:
-                lines.append(title.upper())
+                lines.append(f"### {title}")
             if content:
                 lines.append(content)
             lines.append("")
 
-    # Tables
     tables = structured.get("tables") or []
     if isinstance(tables, list) and tables:
-        lines.append("EXTRACTED TABLES")
+        lines.append("## Extracted Tables")
         lines.append("")
         for i, t in enumerate(tables, start=1):
             if not isinstance(t, dict):
@@ -107,23 +106,47 @@ def _json_to_pretty_text(structured: Dict[str, Any]) -> str:
             title = t.get("title")
             headers = t.get("headers") or []
             rows = t.get("rows") or []
-            lines.append(f"Table {i}" + (f": {title}" if title else ""))
+            lines.append(f"### Table {i}" + (f": {title}" if title else ""))
             try:
                 lines.append(_render_markdown_table(headers, rows))
             except Exception:
-                # fallback
                 lines.append("(Could not render table)")
             lines.append("")
 
-    # final cleanup
-    out = "\n".join(lines).strip()
-    return out
+    return "\n".join(lines).strip()
+
+
+def _docling_fallback_structured(doc_md: str) -> str:
+    # Return ONLY docling extracted markdown (no extra wrapper text)
+    return (doc_md or "").strip()
+
+    out: List[str] = []
+    out.append("## LangExtract (Fallback Mode)")
+    out.append("")
+    out.append(
+        "> Gemini quota/rate limit hit. Showing Docling-structured extraction instead.\n"
+        "> This keeps output usable without breaking other models."
+    )
+    out.append("")
+    out.append("## Document (Docling Markdown)")
+    out.append("")
+    out.append(doc_md)
+    return "\n".join(out).strip()
+
+
+def _is_quota_error(e: Exception) -> bool:
+    s = repr(e).lower()
+    return ("429" in s) or ("resource_exhausted" in s) or ("quota" in s) or ("rate limit" in s)
 
 
 class LangExtractAdapter(OCRAdapter):
     """
-    Produces USER-FRIENDLY extracted text (like other models),
-    while keeping the full structured JSON in raw["structured"].
+    Produces USER-FRIENDLY structured markdown output (like other models),
+    while keeping the full structured JSON in raw["structured"] (when available).
+
+    Important:
+    - LangExtract uses Gemini under the hood -> can throw 429.
+    - On 429, fallback to Docling-only structured markdown instead of failing.
     """
 
     def __init__(self):
@@ -136,6 +159,10 @@ class LangExtractAdapter(OCRAdapter):
         self.model_id = os.getenv("LANGEXTRACT_MODEL", "gemini-2.5-flash").strip()
         self.max_input_chars = int(os.getenv("LANGEXTRACT_MAX_CHARS", "12000"))
 
+        # retries for transient Gemini errors
+        self.max_retries = int(os.getenv("LANGEXTRACT_MAX_RETRIES", "2"))
+        self.base_backoff_sec = float(os.getenv("LANGEXTRACT_BACKOFF_SEC", "1.5"))
+
         self._docling = DoclingAdapter()
 
     def run(self, *, filename: str, mime_type: str, image_bytes: bytes, **kwargs) -> Dict[str, Any]:
@@ -143,11 +170,11 @@ class LangExtractAdapter(OCRAdapter):
 
         t0 = time.time()
 
-        # 1) Docling base extraction
+        # 1) Docling base extraction (always)
         base = self._docling.run(filename=filename, mime_type=mime_type, image_bytes=image_bytes)
-        doc_text = (base.get("text") or "").strip()
+        doc_text_md = (base.get("text") or "").strip()
 
-        if not doc_text:
+        if not doc_text_md:
             latency_ms = int((time.time() - t0) * 1000)
             return {
                 "text": "",
@@ -155,7 +182,8 @@ class LangExtractAdapter(OCRAdapter):
                 "raw": {"engine": "langextract", "note": "Docling returned empty text."},
             }
 
-        doc_text = _chunk_text(doc_text, self.max_input_chars)
+        # Keep input bounded for Gemini
+        doc_text_for_llm = _chunk_text(doc_text_md, self.max_input_chars)
 
         # 2) Schema prompt (strict JSON)
         prompt = (
@@ -185,8 +213,17 @@ class LangExtractAdapter(OCRAdapter):
                             {
                                 "meta": {"document_type": "invoice", "language": "en"},
                                 "sections": [{"title": "Header", "content": "Invoice No: INV-001\nDate: 2025-01-01"}],
-                                "tables": [{"title": "Line Items", "headers": ["Item", "Qty", "Price"], "rows": [["A", "1", "10"]]}],
-                                "key_values": [{"key": "invoice_number", "value": "INV-001"}, {"key": "total", "value": "10"}],
+                                "tables": [
+                                    {
+                                        "title": "Line Items",
+                                        "headers": ["Item", "Qty", "Price"],
+                                        "rows": [["A", "1", "10"]],
+                                    }
+                                ],
+                                "key_values": [
+                                    {"key": "invoice_number", "value": "INV-001"},
+                                    {"key": "total", "value": "10"},
+                                ],
                             }
                         ),
                         attributes={},
@@ -195,52 +232,92 @@ class LangExtractAdapter(OCRAdapter):
             )
         ]
 
-        result = lx.extract(
-            text_or_documents=doc_text,
-            prompt_description=prompt,
-            examples=examples,
-            model_id=self.model_id,
-            api_key=self.gemini_key,
-        )
+        last_err: Optional[Exception] = None
+        raw_text = ""
 
-        extractions = getattr(result, "extractions", None) or []
-        raw_text = (getattr(extractions[0], "extraction_text", "") if extractions else "") or ""
-        raw_text = raw_text.strip()
-
-        json_text = _extract_first_json(raw_text)
-        structured = None
-        if json_text:
+        for attempt in range(self.max_retries + 1):
             try:
-                structured = json.loads(json_text)
-            except Exception:
+                result = lx.extract(
+                    text_or_documents=doc_text_for_llm,
+                    prompt_description=prompt,
+                    examples=examples,
+                    model_id=self.model_id,
+                    api_key=self.gemini_key,
+                )
+
+                extractions = getattr(result, "extractions", None) or []
+                raw_text = (getattr(extractions[0], "extraction_text", "") if extractions else "") or ""
+                raw_text = raw_text.strip()
+
+                json_text = _extract_first_json(raw_text)
                 structured = None
+                if json_text:
+                    try:
+                        structured = json.loads(json_text)
+                    except Exception:
+                        structured = None
+
+                latency_ms = int((time.time() - t0) * 1000)
+
+                if structured is None:
+                    # If JSON failed, return Docling structured view (still useful)
+                    return {
+                        "text": _docling_fallback_structured(doc_text_md),
+                        "latency_ms": latency_ms,
+                        "raw": {
+                            "engine": "langextract",
+                            "provider": "gemini",
+                            "model_id": self.model_id,
+                            "note": "JSON parse failed; showing Docling fallback.",
+                            "raw_model_output": raw_text[:2000],
+                        },
+                    }
+
+                pretty_text = _json_to_pretty_text(structured)
+
+                return {
+                    "text": pretty_text,
+                    "latency_ms": latency_ms,
+                    "raw": {
+                        "engine": "langextract",
+                        "provider": "gemini",
+                        "model_id": self.model_id,
+                        "max_input_chars": self.max_input_chars,
+                        "structured": structured,
+                    },
+                }
+
+            except Exception as e:
+                last_err = e
+
+                # If quota/rate limit, fallback immediately (don't keep hammering)
+                if _is_quota_error(e):
+                    latency_ms = int((time.time() - t0) * 1000)
+                    return {
+                        "text": _docling_fallback_structured(doc_text_md),
+                        "latency_ms": latency_ms,
+                        "raw": {
+                            "engine": "langextract",
+                            "provider": "gemini",
+                            "model_id": self.model_id,
+                            "note": "Gemini quota/rate limit hit; showing Docling fallback.",
+                            "error": repr(e),
+                        },
+                    }
+
+                # backoff then retry
+                time.sleep(self.base_backoff_sec * (attempt + 1))
 
         latency_ms = int((time.time() - t0) * 1000)
-
-        # If JSON failed, fallback to docling text (still readable)
-        if structured is None:
-            return {
-                "text": doc_text,
-                "latency_ms": latency_ms,
-                "raw": {
-                    "engine": "langextract",
-                    "provider": "gemini",
-                    "model_id": self.model_id,
-                    "note": "JSON parse failed; returning docling output.",
-                    "raw_model_output": raw_text[:2000],
-                },
-            }
-
-        pretty_text = _json_to_pretty_text(structured)
-
         return {
-            "text": pretty_text,  # THIS is what UI shows now (no JSON)
+            "text": _docling_fallback_structured(doc_text_md),
             "latency_ms": latency_ms,
             "raw": {
                 "engine": "langextract",
                 "provider": "gemini",
                 "model_id": self.model_id,
-                "max_input_chars": self.max_input_chars,
-                "structured": structured,  # keep JSON here for download/debug
+                "note": "LangExtract failed after retries; showing Docling fallback.",
+                "error": repr(last_err),
             },
         }
+

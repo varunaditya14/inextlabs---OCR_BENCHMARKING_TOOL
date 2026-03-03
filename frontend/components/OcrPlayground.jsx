@@ -237,11 +237,10 @@ function PreviewModal({
 
           <div style={headerRightStyle}>
             <select
-              className="modelSelect2"
+              className="modelSelect2 pvModelSelect"
               value={selectedModel}
               onChange={(e) => onSelectModel?.(e.target.value)}
               disabled={!models?.length}
-              style={{ height: "34px", minWidth: "180px" }}
               aria-label="Select model (preview)"
             >
               {(models || []).map((m) => (

@@ -17,15 +17,9 @@ def _to_data_url(mime_type: str, data: bytes) -> str:
 def _clean_text(text: str) -> str:
     if not text:
         return ""
-
-    # Convert simple HTML bold tags -> Markdown bold
     text = re.sub(r"<\s*b\s*>", "**", text, flags=re.IGNORECASE)
     text = re.sub(r"<\s*/\s*b\s*>", "**", text, flags=re.IGNORECASE)
-
-    # Remove other HTML tags if they appear
     text = re.sub(r"</?[^>]+>", "", text)
-
-    # Normalize excessive blank lines
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
 
@@ -98,11 +92,23 @@ class GPT52Adapter(OCRAdapter):
             text = ""
 
         text = _clean_text(text)
-
         latency_ms = int((time.time() - t0) * 1000)
+
+        # IMPORTANT: Keep raw small (speed)
+        raw: Dict[str, Any] = {}
+        try:
+            usage = getattr(resp, "usage", None)
+            raw = {
+                "id": getattr(resp, "id", None),
+                "model": getattr(resp, "model", None),
+                "usage": usage.model_dump() if usage and hasattr(usage, "model_dump") else (usage.__dict__ if usage else None),
+                "finish_reason": getattr(resp.choices[0], "finish_reason", None) if getattr(resp, "choices", None) else None,
+            }
+        except Exception:
+            raw = {"repr": repr(resp)}
 
         return {
             "text": text,
             "latency_ms": latency_ms,
-            "raw": resp.model_dump() if hasattr(resp, "model_dump") else str(resp),
+            "raw": raw,
         }

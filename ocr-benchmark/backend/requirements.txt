@@ -39,3 +39,7 @@ pip install -U docling
 pip install -U "markitdown[all]"
 pip install -U langextract
 
+pdfplumber
+camelot-py
+pandas
+

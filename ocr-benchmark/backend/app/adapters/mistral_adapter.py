@@ -18,29 +18,17 @@ def _clean_endpoint(raw: str) -> str:
 
 
 def _text_to_lines(text: str) -> List[Dict[str, Any]]:
-    """
-    Convert extracted text into standardized lines array.
-    IMPORTANT: keep leading spaces (don't strip) to avoid breaking table-like alignment.
-    """
     if not text:
         return []
     t = str(text).replace("\r", "").strip("\n")
     if not t.strip():
         return []
     parts = [ln.rstrip() for ln in t.split("\n")]
-    parts = [ln for ln in parts if ln.strip()]  # keep non-empty (but don't destroy indentation)
+    parts = [ln for ln in parts if ln.strip()]
     return [{"text": ln, "score": None, "box": None} for ln in parts]
 
 
 class MistralOCRAdapter(OCRAdapter):
-    """
-    Calls Azure-hosted Mistral OCR endpoint.
-    Needs backend/.env:
-      MISTRAL_OCR_ENDPOINT
-      MISTRAL_OCR_TOKEN
-      MISTRAL_OCR_MODEL (optional)
-    """
-
     def __init__(self):
         self.endpoint = _clean_endpoint(os.getenv("MISTRAL_OCR_ENDPOINT", ""))
         self.token = os.getenv("MISTRAL_OCR_TOKEN", "").strip().strip('"').strip("'")
@@ -50,6 +38,8 @@ class MistralOCRAdapter(OCRAdapter):
             raise RuntimeError("MISTRAL_OCR_ENDPOINT is missing in backend/.env")
         if not self.token:
             raise RuntimeError("MISTRAL_OCR_TOKEN is missing in backend/.env")
+
+        self._session = requests.Session()
 
     @property
     def name(self) -> str:
@@ -96,7 +86,7 @@ class MistralOCRAdapter(OCRAdapter):
         }
 
         try:
-            resp = requests.post(self.endpoint, headers=headers, json=payload, timeout=120)
+            resp = self._session.post(self.endpoint, headers=headers, json=payload, timeout=120)
         except Exception as e:
             raise RuntimeError(f"Mistral OCR request failed: {repr(e)}")
 
@@ -130,10 +120,11 @@ class MistralOCRAdapter(OCRAdapter):
                         extracted_text = v.strip()
                         break
 
-        # ✅ keep output consistent across models (rarely changes Mistral, but safe)
         extracted_text = normalize_to_markdown(extracted_text)
-
         lines = _text_to_lines(extracted_text)
+
+        # Keep raw small-ish (main.py also trims)
+        raw_small = {"engine": "mistral", "has_pages": isinstance((data or {}).get("pages"), list)}
 
         return {
             "model": self.name,
@@ -142,7 +133,7 @@ class MistralOCRAdapter(OCRAdapter):
             "backend_latency_ms": latency_ms,
             "latency_ms": latency_ms,
             "text": extracted_text,
-            "lines": lines,                 # ✅ frontend-friendly
+            "lines": lines,
             "line_count": len(lines),
-            "raw": data,
+            "raw": raw_small,
         }
