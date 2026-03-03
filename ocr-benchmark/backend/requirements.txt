@@ -1,45 +1,39 @@
 fastapi
 uvicorn
 python-multipart
+python-dotenv
 
-# OCR runtime (PINNED to avoid ABI issues)
+# Core
+requests>=2.31.0
+httpx
+
+# PDF/Image
+pymupdf
+pillow
+
+# OCR (local)
 numpy==1.26.4
 opencv-python==4.6.0.66
 opencv-contrib-python==4.6.0.66
-
 easyocr
 paddleocr==2.7.3
 paddlepaddle
 
-httpx
-python-dotenv
-
-pymupdf
-pillow
-
+# LLM / API adapters
 google-genai
-
-transformers
-pillow
-sentencepiece
-torch
-
-ollama pull glm-ocr;
-
 openai>=1.40.0
-requests>=2.31.0
-python-dotenv>=1.0.1
 
-transformers>=4.40.0
-torch>=2.0.0
-accelerate
-pillow
+# Docling / MarkItDown / LangExtract
+docling
+markitdown[all]
+langextract
 
-pip install -U docling
-pip install -U "markitdown[all]"
-pip install -U langextract
-
+# Table/text utilities used by MarkItDown/Camelot flows
 pdfplumber
 camelot-py
 pandas
 
+transformers>=4.40.0
+torch>=2.0.0
+accelerate
+sentencepiece
