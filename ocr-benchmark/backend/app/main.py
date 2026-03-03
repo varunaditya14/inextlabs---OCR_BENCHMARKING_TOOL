@@ -25,6 +25,8 @@ print("ENV PATH:", BACKEND_ENV)
 print("AZURE_OPENAI_API_KEY present?", bool(os.getenv("AZURE_OPENAI_API_KEY")))
 print("AZURE_OPENAI_ENDPOINT:", os.getenv("AZURE_OPENAI_ENDPOINT"))
 print("AZURE_OPENAI_DEPLOYMENT:", os.getenv("AZURE_OPENAI_DEPLOYMENT"))
+print("MISTRALV2_API_KEY present?", bool(os.getenv("MISTRALV2_API_KEY")))
+print("MISTRALV2_ENDPOINT:", os.getenv("MISTRALV2_ENDPOINT"))
 
 # ===== Adapters =====
 from app.adapters.easyocr_adapter import EasyOCRAdapter
@@ -35,6 +37,9 @@ from app.adapters.gemini3pro_adapter import Gemini3ProAdapter
 from app.adapters.trocr_adapter import TrOCRAdapter
 from app.adapters.glmocr_adapter import GLMOCRAdapter
 from app.adapters.gpt52_adapter import GPT52Adapter
+
+# ✅ NEW: Mistral V2 adapter (filename MUST be mistralv2_adapter.py)
+from app.adapters.mistralv2_adapter import MistralV2Adapter
 
 app = FastAPI(title="OCR Benchmark Backend")
 
@@ -47,23 +52,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ===== Registry of available models =====
-ADAPTERS = {
-    "easyocr": EasyOCRAdapter,
-    "paddleocr": PaddleOCRAdapter,
-    "mistral": MistralOCRAdapter,
-    "gemini3": Gemini3Adapter,
-    "gemini3pro": Gemini3ProAdapter,
-    "trocr": TrOCRAdapter,
-    "glm-ocr": GLMOCRAdapter,
-    "gpt52": GPT52Adapter,
-}
-
-# ✅ Pretty labels for frontend dropdown
+# ===== Labels for dropdown (backend ID can stay same) =====
 MODEL_LABELS = {
     "easyocr": "EasyOCR",
     "paddleocr": "PaddleOCR",
     "mistral": "Mistral OCR",
+    "mistralv2": "Mistral V2",
     "gemini3": "Gemini 3",
     "gemini3pro": "Gemini 3 Pro",
     "trocr": "TrOCR",
@@ -71,11 +65,25 @@ MODEL_LABELS = {
     "gpt52": "GPT 5.2",
 }
 
+# ===== Registry of available models =====
+ADAPTERS = {
+    "easyocr": EasyOCRAdapter,
+    "paddleocr": PaddleOCRAdapter,
+    "mistral": MistralOCRAdapter,
+    "mistralv2": MistralV2Adapter,   # ✅ NEW
+    "gemini3": Gemini3Adapter,
+    "gemini3pro": Gemini3ProAdapter,
+    "trocr": TrOCRAdapter,
+    "glm-ocr": GLMOCRAdapter,
+    "gpt52": GPT52Adapter,
+}
+
 # Models that require image bytes (if PDF uploaded -> convert first page to PNG)
-IMG_ONLY_MODELS = {"easyocr", "paddleocr", "trocr", "gemini3", "gemini3pro", "glm-ocr", "gpt52"}
+# NOTE: mistralv2 supports PDF base64, so DO NOT put it here.
+IMG_ONLY_MODELS = {"easyocr", "paddleocr", "trocr", "gemini3", "gemini3pro", "glm-ocr", "gpt52", "nanonets"}
 
 # ✅ Model categories for safe concurrency controls
-API_MODELS = {"gemini3", "gemini3pro", "mistral", "glm-ocr", "gpt52"}  # network/rate-limited
+API_MODELS = {"gemini3", "gemini3pro", "mistral", "mistralv2", "glm-ocr", "gpt52"}  # network/rate-limited
 HEAVY_LOCAL_MODELS = {"trocr"}  # heavy torch model
 
 # ✅ Semaphores (tune these)
@@ -173,6 +181,7 @@ async def run_benchmark(file: UploadFile = File(...)) -> Dict[str, Any]:
             effective_mime = mime_type
             effective_filename = filename
 
+            # Convert PDF -> PNG only for IMG_ONLY_MODELS
             if mime_type == "application/pdf" and model in IMG_ONLY_MODELS:
                 effective_bytes = png_bytes
                 effective_mime = "image/png"
@@ -240,7 +249,11 @@ async def run_benchmark(file: UploadFile = File(...)) -> Dict[str, Any]:
     models = list(ADAPTERS.keys())
     results_list = await asyncio.gather(*(run_one(m) for m in models))
 
-    results = {r.get("model", "unknown"): r for r in results_list}
+    results = {}
+    for r in results_list:
+        k = r.get("model", "unknown")
+        results[k] = r
+
     return {"filename": filename, "mime_type": mime_type, "results": results}
 
 
@@ -302,4 +315,3 @@ async def run_ocr(
     )
 
     return sanitize_for_json(result)
-
